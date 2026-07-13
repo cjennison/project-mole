@@ -15,11 +15,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function runTool(script, address, jobId, onPhase) {
   return new Promise((resolve) => {
     const env = { ...process.env, MOLE_RUN_ID: jobId, MOLE_ADDRESS: address, MOLE_TELEMETRY_STDERR: '1' };
-    const child = spawn('node', [path.join(ROOT, script), address], { cwd: ROOT, env });
-    let out = '', errBuf = '';
+    const child = spawn(process.execPath, [path.join(ROOT, script), address], { cwd: ROOT, env });
+    let out = '', errBuf = '', errAll = '';
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => {
-      errBuf += d;
+      errBuf += d; errAll += d;
       let nl;
       while ((nl = errBuf.indexOf('\n')) >= 0) {
         const line = errBuf.slice(0, nl); errBuf = errBuf.slice(nl + 1);
@@ -27,12 +27,20 @@ function runTool(script, address, jobId, onPhase) {
         if (m) { try { onPhase(JSON.parse(m[1])); } catch {} }
       }
     });
-    child.on('close', () => { try { resolve(JSON.parse(out)); } catch { resolve(null); } });
-    child.on('error', () => resolve(null));
+    child.on('close', (code) => {
+      let parsed = null;
+      try { parsed = JSON.parse(out); } catch {}
+      if (!parsed) {
+        const nonTel = errAll.split('\n').filter(l => l && !l.includes('@@MOLE_TELEMETRY')).slice(-8).join(' | ');
+        console.error(`[worker] ${script} exit=${code} no-json. stdout(${out.length}b): ${out.slice(0, 300)} :: stderr: ${nonTel}`);
+      }
+      resolve(parsed);
+    });
+    child.on('error', (e) => { console.error(`[worker] spawn error for ${script}: ${e.message}`); resolve(null); });
   });
 }
 
-async function process(job) {
+async function processJob(job) {
   const { id, address } = job;
   console.log(`[worker] processing ${id} :: ${address}`);
   const phases = [{ event: 'run_start', status: 'start', at: new Date().toISOString() }];
@@ -45,7 +53,10 @@ async function process(job) {
   };
 
   const data = await runTool('tools/collect.mjs', address, id, onPhase);
-  if (!data || !data.parcel) { await store.patchJob(id, { status: 'error', error: 'data collection failed (no parcel)', phases }); return; }
+  if (!data || !data.parcel) {
+    const detail = data ? ('errors=' + JSON.stringify(data.errors || {}) + (data.fatal ? ' fatal=' + data.fatal : '')) : 'no output from collect.mjs';
+    await store.patchJob(id, { status: 'error', error: 'data collection failed — ' + detail, phases }); return;
+  }
 
   const site = await runTool('tools/sitemap.cjs', address, id, onPhase);
 
@@ -72,7 +83,7 @@ async function main() {
     try { item = await store.receiveOne(); } catch (e) { console.warn('receive failed', e.message); await sleep(3000); continue; }
     if (!item) { idle++; await sleep(2000); continue; }
     idle = 0;
-    try { await process(item.payload); }
+    try { await processJob(item.payload); }
     catch (e) { console.error('job failed', e); try { await store.patchJob(item.payload.id, { status: 'error', error: String(e.message || e) }); } catch {} }
     try { await store.deleteMessage(item.msg); } catch (e) { console.warn('delete failed', e.message); }
   }
