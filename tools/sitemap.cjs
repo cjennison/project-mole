@@ -208,21 +208,23 @@ async function fetchTile(z, x, y) {
         emit('vision', { status: 'ok' });
       } catch (e) { out.visionError = String(e.message || e); emit('vision', { status: 'error', error: e }); }
     }
-    // Place the ADU at the vision-recommended spot, clamped into the buildable envelope.
+    // Place the ADU at the fitting location CLOSEST to the vision-recommended spot (local search
+    // over the buildable envelope), so we honor the AI recommendation whenever a box fits.
     if (visionResult && visionResult.adu && typeof visionResult.adu.x === 'number' && biggest) {
       try {
         const [vlon, vlat] = fromPx(visionResult.adu.x * W, visionResult.adu.y * H);
-        let ctr = turf.point([vlon, vlat]);
-        if (!turf.booleanPointInPolygon(ctr, biggest)) {
-          const np = turf.nearestPointOnLine(turf.polygonToLine(biggest), ctr);
-          ctr = turf.destination(np, side * 0.8, turf.bearing(np, turf.centroid(biggest)), { units: 'feet' });
+        const target = turf.point([vlon, vlat]);
+        const [x0, y0, x1, y1] = turf.bbox(biggest);
+        const N = 26; let best = null, bestD = Infinity;
+        for (let ix = 0; ix <= N; ix++) for (let iy = 0; iy <= N; iy++) {
+          const ctr = turf.point([x0 + (x1 - x0) * ix / N, y0 + (y1 - y0) * iy / N]);
+          if (!turf.booleanPointInPolygon(ctr, biggest)) continue;
+          const box = mkBox(ctr);
+          if (!box.geometry.coordinates[0].every(c => turf.booleanPointInPolygon(turf.point(c), biggest))) continue;
+          const d = turf.distance(ctr, target, { units: 'feet' });
+          if (d < bestD) { bestD = d; best = box; }
         }
-        let vbox = mkBox(ctr);
-        if (!vbox.geometry.coordinates[0].every(c => turf.booleanPointInPolygon(turf.point(c), biggest))) {
-          ctr = turf.destination(ctr, side, turf.bearing(ctr, turf.centroid(biggest)), { units: 'feet' });
-          vbox = mkBox(ctr);
-        }
-        if (vbox.geometry.coordinates[0].every(c => turf.booleanPointInPolygon(turf.point(c), biggest))) { aduBox = vbox; aduSource = 'vision'; out.aduFitsSqFt = Math.round(side * side); }
+        if (best) { aduBox = best; aduSource = 'vision'; out.aduFitsSqFt = Math.round(side * side); }
       } catch (e) { out.visionPlaceError = String(e.message || e); }
     }
     out.aduSource = aduSource;
