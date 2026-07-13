@@ -1,0 +1,19 @@
+# Slim worker image for Azure Container Apps — runs the deterministic feasibility
+# pipeline (collect + sitemap) and the queue worker. No Copilot CLI / Playwright / Chromium.
+FROM node:24-bookworm-slim
+
+WORKDIR /app
+
+# Install only production deps (turf, @napi-rs/canvas, azure SDKs). @napi-rs/canvas ships a
+# self-contained prebuilt binary, so no system graphics libraries are required.
+COPY package.json package-lock.json ./
+RUN npm install --omit=dev --no-audit --no-fund
+
+# App code
+COPY tools/ ./tools/
+COPY lib/ ./lib/
+COPY worker/ ./worker/
+COPY knowledge/ ./knowledge/
+
+ENV NODE_ENV=production
+CMD ["node", "worker/worker.mjs"]

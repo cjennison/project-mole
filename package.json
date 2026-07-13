@@ -5,7 +5,13 @@
   "description": "NH ADU feasibility tools (data collector, assessor scraper, site-map renderer, telemetry)",
   "type": "commonjs",
   "dependencies": {
+    "@azure/data-tables": "^13.3.0",
+    "@azure/storage-blob": "^12.26.0",
+    "@azure/storage-queue": "^12.25.0",
     "@napi-rs/canvas": "^0.1.65",
     "@turf/turf": "^7.1.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
   }
 }

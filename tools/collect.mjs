@@ -25,10 +25,16 @@ async function step(name, fn) {
   }
 }
 
-const j = async (url) => {
-  const r = await fetch(url, { headers: { 'User-Agent': 'project-mole/1.0' } });
-  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-  return r.json();
+const j = async (url, tries = 3) => {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': 'project-mole/1.0' } });
+      if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+      return r.json();
+    } catch (e) { lastErr = e; if (i < tries - 1) await new Promise(res => setTimeout(res, 400 * (i + 1))); }
+  }
+  throw lastErr;
 };
 const qs = (o) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 const out = { address: ADDRESS, generatedAt: new Date().toISOString(), errors: {} };

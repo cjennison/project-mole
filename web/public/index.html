@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project MOLE — NH ADU Feasibility</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <div class="brand">
+        <div class="logo">🦔</div>
+        <div>
+          <h1>Project&nbsp;MOLE</h1>
+          <p class="tag">Autonomous ADU feasibility for New&nbsp;Hampshire — address in, report out.</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card search">
+      <label for="addr">Property address</label>
+      <div class="row">
+        <input id="addr" type="text" placeholder="e.g. 1335 River Road, Manchester, NH" autocomplete="off" />
+        <button id="go">Run feasibility</button>
+      </div>
+      <div class="examples">
+        <span>Try:</span>
+        <button class="chip" data-a="1335 River Road, Manchester, NH">1335 River Road</button>
+        <button class="chip" data-a="1341 River Road, Manchester, NH">1341 River Road</button>
+        <button class="chip" data-a="200 Bedford Street, Manchester, NH">200 Bedford Street</button>
+      </div>
+    </section>
+
+    <section id="progress" class="card hidden">
+      <div class="progress-head">
+        <h2>Analyzing <span id="p-addr"></span></h2>
+        <span id="p-status" class="pill">queued</span>
+      </div>
+      <ol id="steps" class="steps"></ol>
+      <p class="hint">The job runs on a single queued MOLE agent. Live steps stream from the agent's telemetry (also recorded in Application&nbsp;Insights).</p>
+    </section>
+
+    <section id="result" class="hidden"></section>
+  </main>
+
+  <footer class="wrap foot">
+    <span>Project MOLE · deterministic feasibility pipeline · data: NH GRANIT, NH Zoning Atlas, FEMA NFHL, NHDES, Esri imagery</span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
