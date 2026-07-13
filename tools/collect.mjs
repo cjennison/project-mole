@@ -25,14 +25,17 @@ async function step(name, fn) {
   }
 }
 
-const j = async (url, tries = 3) => {
+const j = async (url, { tries = 3, timeoutMs = 20000 } = {}) => {
   let lastErr;
   for (let i = 0; i < tries; i++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs);
     try {
-      const r = await fetch(url, { headers: { 'User-Agent': 'project-mole/1.0' } });
+      const r = await fetch(url, { headers: { 'User-Agent': 'project-mole/1.0' }, signal: ctl.signal });
       if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-      return r.json();
-    } catch (e) { lastErr = e; if (i < tries - 1) await new Promise(res => setTimeout(res, 400 * (i + 1))); }
+      return await r.json();
+    } catch (e) { lastErr = e; if (i < tries - 1) await new Promise(res => setTimeout(res, 600 * (i + 1))); }
+    finally { clearTimeout(timer); }
   }
   throw lastErr;
 };
@@ -174,16 +177,25 @@ async function zoning({ lon, lat }, town) {
 }
 
 // ---------- 4. Flood (FEMA NFHL) ----------
+// FEMA's hazards.fema.gov is the flakiest dependency (periodic outages / slow responses), so
+// give it extra retries + a longer per-request timeout, and on total failure still record a
+// clear "unknown — verify manually" flood status (not a silent gap) while re-throwing so the
+// telemetry marks the data gap.
 async function flood({ lon, lat }) {
   const u = `https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query?${qs({
     geometry: `${lon},${lat}`, geometryType: 'esriGeometryPoint', inSR: 4326,
     spatialRel: 'esriSpatialRelIntersects', outFields: 'FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE',
     returnGeometry: 'false', f: 'json' })}`;
-  const d = await j(u);
-  const a = d.features?.[0]?.attributes;
-  out.flood = a ? { zone: a.FLD_ZONE, subtype: a.ZONE_SUBTY, sfha: a.SFHA_TF, bfe: a.STATIC_BFE }
-                : { zone: 'X (implied)', sfha: 'F', note: 'no NFHL polygon at point = outside mapped SFHA' };
-  return out.flood;
+  try {
+    const d = await j(u, { tries: 5, timeoutMs: 25000 });
+    const a = d.features?.[0]?.attributes;
+    out.flood = a ? { zone: a.FLD_ZONE, subtype: a.ZONE_SUBTY, sfha: a.SFHA_TF, bfe: a.STATIC_BFE }
+                  : { zone: 'X (implied)', sfha: 'F', note: 'no NFHL polygon at point = outside mapped SFHA' };
+    return out.flood;
+  } catch (e) {
+    out.flood = { zone: 'unknown', sfha: 'U', note: 'FEMA NFHL service unavailable — verify manually at msc.fema.gov/portal/search', error: String(e && e.message ? e.message : e) };
+    throw e;
+  }
 }
 
 // ---------- 5. Shoreland (NHDES official + GRANIT distance) ----------
