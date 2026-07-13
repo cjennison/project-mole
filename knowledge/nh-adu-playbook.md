@@ -139,22 +139,29 @@ pre-filled action list instead of a blank research project.
 
 | Dimension | Finding | Source | Confidence |
 |---|---|---|---|
-| Lot | ~0.59 ac (~25,700 sq ft), single-family ranch, built 1979, 3bd/2.5ba, 2,028 sqft | Zillow/Redfin/Realtor | med (need assessor confirm) |
-| Value | Sold $605k (May 2024); Zestimate ~$674k | Zillow | med |
+| **Geocode** | lon -71.470117, lat 43.025655 | US Census geocoder | ✅ confirmed |
+| **Parcel ID** | **PID 222-83** (NH_GIS_ID 064134-222-83); Manchester (TownID 4134), Hillsborough Co (6) | NH GRANIT ParcelMosaic | ✅ confirmed |
+| Lot | **25,778 sq ft = 0.592 ac** (Shape_Area); single-family ranch, built 1979, 3bd/2.5ba, 2,028 sqft | NH GRANIT (area) + Zillow (bldg) | ✅ lot confirmed |
+| Land use | **SLU/SLUC = 11** (single-family residential) → single-family IS the use → **ADU allowed by right** | NH GRANIT | ✅ (verify SLU table) |
+| Value | Sold $605k (May 2024); Zestimate ~$674k | Zillow | med (get assessor card) |
 | Sewer | **Public sewer** (listing) | Redfin | med (confirm w/ Manchester EPD) |
 | Water | Assume public (North End) — **CONFIRM** | — | low |
 | Zoning | Likely **R-1A/R-1B** single-family; ADU allowed by right | Manchester zoning + RSA 674:72 | med (confirm district in GIS) |
 | ADU size cap | Manchester: max 900 sq ft, ≤2 br, ≤ primary height, detached ≥5 ft, no front-yard | Manchester ADU info sheet | med |
-| **Shoreland** | River Rd abuts **Merrimack River** → almost certainly within **250-ft protected shoreland**; ADU needs **NHDES Shoreland Permit**, 50-ft primary-structure setback | RSA 483-B; NHDES | **HIGH LIKELIHOOD — key constraint** |
-| Floodplain | Portions of River Rd near river are FEMA **Zone AE**; must check parcel on FEMA MSC | FEMA MSC / NH viewer | needs parcel-level check |
+| **Floodplain** | **Zone X, SFHA=False — NOT in a flood zone** (at rooftop point) | FEMA NFHL API | ✅ confirmed (check rear yard too) |
+| **Shoreland** | **NOT APPLICABLE** — 0 fourth-order+ water within 250 ft; nearest Merrimack River ≈ 0.5 mi (2,600–3,000 ft) east. "River Rd" is a misnomer → **no NHDES shoreland permit needed** | NH GRANIT IWR/WaterResources | ✅ confirmed (big assumption corrected) |
 | Building code | 2021 IRC/IBC | NH Fire Safety | high |
 | Impact fees | Manchester charges impact fees on new dwelling units — amount TBD | Manchester PCD | needs lookup |
 
 ### Biggest gating items for THIS property
-1. **Shoreland permit (NHDES)** — likely required; sets a hard 50-ft-from-river line and
-   caps where the ADU can go. *This is the #1 thing to resolve.*
-2. **Flood zone** — if the buildable area is Zone AE, elevation + floodplain permit apply.
-3. **Confirm public water/sewer** — if septic/well, capacity & 75-ft setbacks re-open design.
+1. ~~Shoreland permit~~ **CLEARED** — Merrimack is ~0.5 mi away; RSA 483-B does not apply.
+2. ~~Flood zone~~ **CLEARED** at house point — Zone X (not SFHA). *Still verify the specific
+   ADU location if it moves toward any low area.*
+3. **Zoning district + dimensional fit** — confirm district (R-1A/R-1B) and that the 0.59-ac
+   lot has a buildable envelope inside setbacks for a ≤900 sqft ADU. *Now the primary gate.*
+4. **Confirm public water/sewer** — if truly public (likely), septic/well analysis is moot;
+   if not, re-open capacity + 75-ft setbacks.
+5. **Wetlands** — check for wetlands on-parcel (Milestone Brook is nearby); minor, verify.
 
 ### Immediate agent-doable next steps (still open)
 - [ ] Pull official assessor card (VGSI) → exact lot size, map/lot, assessed value, utility flags.
