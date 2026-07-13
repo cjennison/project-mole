@@ -17,10 +17,12 @@ area using **per-edge setbacks** (front 25 ft / side 20 ft / rear 30 ft) · red 
 ft ADU auto-placed in the open side/rear yard · blue dot = house. Buildable area ≈ **11,927 sq
 ft** of the 25,735 sq ft lot. The front edge is detected as the parcel edge nearest a mapped
 road (Census TIGER). **Note:** the existing house footprint is not carved out here — the
-national building-footprint layer (FEMA USA Structures) is registered ~10 m off the aerial for
-this parcel, so it was not reliably matched; the green area therefore still includes the house
-pad. Final ADU siting must sit ≥5 ft from the primary structure, out of the front yard, and
-clear the driveway — confirm with a site plan.*
+national building-footprint layer (FEMA USA Structures) aligns well with the aerial but is
+**missing this particular house** (it sits under heavy tree canopy, so the imagery-derived
+footprint layer didn't capture it); the green area therefore still includes the house pad. The
+carve fires automatically on parcels whose building is present in the footprint layer. Final ADU
+siting must sit ≥5 ft from the primary structure, out of the front yard, and clear the driveway
+— confirm with a site plan.*
 
 ---
 

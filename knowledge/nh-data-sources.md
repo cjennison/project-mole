@@ -215,9 +215,13 @@ building carve-out + a sample ADU auto-placed in the open yard. Deps: `@turf/tur
 - **Building carve:** **FEMA USA Structures** footprints
   `https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/USA_Structures_View/FeatureServer/0`
   — query near the parcel, keep those intersecting it, carve each + a 5 ft separation buffer.
-  ⚠️ This layer is often **registered ~10 m off** the Esri imagery, so for some parcels no
-  footprint matches and the house is NOT carved (reported as `buildingsCarved: 0`). Honest
-  limitation — don't fabricate a footprint.
+  This layer **aligns well with the Esri imagery** (verified by overlay), so the carve lands
+  correctly when a footprint exists. ⚠️ It can be **missing** individual buildings (coverage
+  gaps — e.g. tree-obscured houses; observed for 1335 River Rd), in which case no carve happens
+  (`buildingsCarved: 0`) and the house pad remains inside the green area — reported honestly.
+  Investigated fallbacks and rejected: **OSM Overpass** (public endpoints 504/time out — not
+  production-reliable), **Microsoft footprints** (no stable public queryable endpoint),
+  **NH GRANIT** (no building layer), **Manchester MapGeo** (commercial portal, no clean API).
 - **ADU placement:** grid-search the largest buildable piece for a 30×30 ft (900 sf) square
   that fits and is farthest from the front edge (→ rear/side yard).
 - ✅ Tested `1335 River Rd`: per-edge buildable ≈ 11,927 sf; 900 sf ADU placed in the side yard.
