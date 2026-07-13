@@ -68,9 +68,13 @@ function renderResult(job) {
     if (r.siteAnalysis.summary) card.appendChild(el('p', 'analysis', r.siteAnalysis.summary));
     if (r.siteAnalysis.rationale) { const p = el('p', 'analysis'); p.innerHTML = `<b>Recommended ADU location:</b> ${r.siteAnalysis.rationale}`; card.appendChild(p); }
     if (r.siteAnalysis.features && r.siteAnalysis.features.length) {
-      const chips = el('div', 'featchips');
-      for (const f of r.siteAnalysis.features) chips.appendChild(el('span', 'featchip', f.label));
-      card.appendChild(el('div', 'k', 'Detected on the lot')); card.appendChild(chips);
+      const seen = new Set(); const labels = [];
+      for (const f of r.siteAnalysis.features) { const k = (f.label || '').toLowerCase(); if (!k || k === 'other' || seen.has(k)) continue; seen.add(k); labels.push(k.replace('_', ' ')); }
+      if (labels.length) {
+        const chips = el('div', 'featchips');
+        for (const l of labels) chips.appendChild(el('span', 'featchip', l));
+        card.appendChild(el('div', 'k', 'Detected on the lot')); card.appendChild(chips);
+      }
     }
     if (r.siteAnalysis.concerns && r.siteAnalysis.concerns.length) {
       card.appendChild(el('div', 'k', 'Verify before siting'));
