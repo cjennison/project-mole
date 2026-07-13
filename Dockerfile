@@ -28,8 +28,18 @@ RUN npm install -g @playwright/mcp@latest playwright
 RUN npx playwright install-deps chromium && \
     npx playwright install chromium
 
-# Set working directory (workspace is mounted at runtime)
+# Set working directory (workspace is mounted at runtime for local dev,
+# but the project code is also baked in below so the image is self-contained
+# for Azure Container Apps).
 WORKDIR /workspace
+
+# Resolve globally-installed modules (playwright) from any `node` invocation.
+ENV NODE_PATH=/usr/local/lib/node_modules
+
+# Bake the agent's brain + tools into the image (overridden by a bind mount in dev).
+COPY AGENTS.md ./AGENTS.md
+COPY knowledge/ ./knowledge/
+COPY tools/ ./tools/
 
 # Default MCP config (used if ~/.copilot is not mounted from host)
 COPY config/mcp.json /etc/copilot/mcp.json

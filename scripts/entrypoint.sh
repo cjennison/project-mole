@@ -34,17 +34,24 @@ console.log('✅ Config ready for', user);
 JS
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-# Copilot CLI accepts the token via COPILOT_GITHUB_TOKEN env var.
-# COPILOT_TOKEN is our input variable; export it under the name Copilot expects.
 if [ -n "$COPILOT_TOKEN" ]; then
     export COPILOT_GITHUB_TOKEN="$COPILOT_TOKEN"
     echo "🔑 Auth token set via COPILOT_GITHUB_TOKEN"
 fi
 
-# ── Run Copilot CLI ───────────────────────────────────────────────────────────
-if [ -n "$COPILOT_PROMPT" ]; then
+# ── Run ───────────────────────────────────────────────────────────────────────
+# Priority: ADDRESS (feasibility-report mode) > COPILOT_PROMPT > interactive.
+if [ -n "$ADDRESS" ]; then
+    echo "🏠 ADU feasibility run for: $ADDRESS"
+    mkdir -p /workspace/reports
+    PROMPT="You have been invoked to produce an NH ADU feasibility report. \
+Follow the instructions in AGENTS.md exactly. The target address is: \"$ADDRESS\". \
+Collect data with tools/collect.mjs and tools/vgsi.cjs, apply NH + Manchester law, and \
+write the report to reports/ then print a short summary. Work autonomously; do not ask questions."
+    exec copilot --allow-all-tools --prompt "$PROMPT"
+elif [ -n "$COPILOT_PROMPT" ]; then
     echo "▶  Running with prompt: $COPILOT_PROMPT"
-    exec copilot --prompt "$COPILOT_PROMPT"
+    exec copilot --allow-all-tools --prompt "$COPILOT_PROMPT"
 else
     echo "▶  Starting interactive Copilot CLI..."
     exec copilot
