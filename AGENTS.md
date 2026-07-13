@@ -16,39 +16,45 @@ your own reasoning and vision are the intelligence in this system.
   - `reports/<BASE>.json` — structured `{ data, report, site }`
   `tools/report.mjs` writes all of these (plus `.data.json`) for you — you drive it.
 
-## The core loop — generate, THEN look and correct
+## The core loop — generate, THEN look at the LABELED GRID and correct
 1. **Generate everything** for this address:
    ```
    node tools/report.mjs "<MOLE_ADDRESS>" "<MOLE_JOB_ID>"
    ```
-   It runs the deterministic data pipeline (`collect.mjs`), renders the site map
-   (`sitemap.cjs`), builds the report, and prints a JSON summary including `aduPlacedNorm`
-   and the classified grid `cells` (open / house / pool). Collect data is cached, so
-   re-runs only re-render (fast).
+   It runs the deterministic pipeline, renders the map, builds the report, and prints a JSON
+   summary with the field **`gridImage`** (path to a zoomed, labeled decision image) plus the
+   classified `cells`. Collect data is cached, so re-runs only re-render (fast).
 
-2. **LOOK at the map with your own eyes** — this is the whole point of you being here:
+2. **LOOK at the LABELED GRID image — this is your primary decision tool and the whole point of
+   you being here:**
    ```
-   view reports/<BASE>.png    (use your image-viewing ability)
+   view reports/<BASE>-grid.png     (the `gridImage` path; a zoomed aerial with lettered/numbered
+                                      cells like C4, F4, and the current ADU box outlined in RED)
    ```
-   Critically check the **red ADU box**. It is WRONG if it sits:
-   - on/over a **swimming pool** or any water,
-   - in **tree/forest canopy** (it should be on cleared, open ground),
-   - on the **existing house/driveway/roof**, or
-   - across the parcel from the house with no practical utility/driveway access.
-   The ADU belongs on **open, cleared ground next to the existing house** (e.g. right of a pool),
-   inside the green buildable envelope.
+   Go cell by cell and classify each labeled cell **with your own eyes** into one of:
+   **open lawn / cleared dirt**, **swimming pool**, **pool deck / patio**, **house / roof**,
+   **driveway / pavement**, or **trees/forest**.
+   ⚠️ The pixel classifier and any color tints are **UNRELIABLE for pools** — an in-ground pool
+   plus its decking usually reads as tan "open" ground, NOT blue. **Trust your eyes, not the tint
+   or the `cells.pool` list.** A pool is a smooth rectangular/oval basin, often with a distinct
+   deck border and different color/texture than grass.
 
-3. **If the box is wrong, correct it and re-render.** From the printed `cells.open` list and
-   what you SEE in the image, choose the open cell that is genuinely clear and closest to the
-   house, then:
-   ```
-   MOLE_ADU_HINT="<cell label e.g. G4, or lon,lat>" node tools/report.mjs "<MOLE_ADDRESS>" "<MOLE_JOB_ID>"
-   ```
-   View the new `reports/<BASE>.png` again. Repeat until the box is unambiguously on open
-   ground beside the house. Do not stop while the ADU is on a pool, in trees, or on a building.
+3. **Judge the RED box.** It is WRONG if it sits on or touching a pool, pool deck/patio, driveway,
+   house/roof, or trees. The ADU must go on **genuinely OPEN LAWN or cleared ground, as close to
+   the house as practical** (e.g. the open cell just to the side of the pool), big enough for a
+   30×30 ft footprint, and NOT in the front yard between the house and the street.
 
-4. When the placement is right, you're done rendering. The `.md`/`.json`/`.png` are already
-   written for the worker to upload.
+4. **If it's wrong, move it and re-render.** Pick the best OPEN-LAWN cell label you SEE, then:
+   ```
+   MOLE_ADU_HINT="<cell label e.g. G4>" node tools/report.mjs "<MOLE_ADDRESS>" "<MOLE_JOB_ID>"
+   ```
+   **View the new `reports/<BASE>-grid.png` again** and confirm the red box is now fully on open
+   ground and clear of the pool/house/driveway/trees. Repeat (try adjacent cells) until it is
+   unambiguously correct. **Never finish while the ADU box is on a pool, patio, driveway, roof, or
+   trees.** If you are unsure whether a cell is open, zoom further (crop the PNG) before deciding.
+
+5. When the placement is genuinely correct, you're done rendering. The `.md`/`.json`/`.png` are
+   already written for the worker to upload.
 
 ## Emit telemetry as you go
 Mark progress so the dashboard can track the run:

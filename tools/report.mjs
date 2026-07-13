@@ -89,6 +89,7 @@ function run(script, args) {
     ok: !!site.ok,
     base: BASE,
     map: path.relative(ROOT, mapPath).replace(/\\/g, '/'),
+    gridImage: site.gridImage ? `reports/${site.gridImage}` : null,
     verdict: report.verdict,
     aduSource: site.aduSource,
     aduHint: site.aduHint || null,
@@ -98,6 +99,6 @@ function run(script, args) {
     aduFitsSqFt: site.aduFitsSqFt,
     classZoom: site.classZoom,
     cells: { open: openCells, house: houseCells, pool: poolCells },
-    hintUsage: 'Re-run with MOLE_ADU_HINT="<lon,lat or cell label>" to move the ADU box.',
+    hintUsage: 'View the gridImage, find an OPEN-LAWN cell with your eyes, then re-run with MOLE_ADU_HINT="<cell label>" to move the ADU there.',
   }, null, 2));
 })();

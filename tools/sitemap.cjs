@@ -433,6 +433,43 @@ async function fetchTile(z, x, y) {
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
     fs.writeFileSync(OUT, canvas.toBuffer('image/png'));
     out.ok = true; out.zoom = z; out.imageSize = `${W}x${H}`;
+
+    // --- Labeled grid image for the CLI agent's review. Same aerial + per-cell classification tint +
+    //     readable cell labels, so the agent can SEE features the pixel classifier misses (esp. a pool,
+    //     which reads as tan decking not blue) and name an OPEN cell to move the ADU to via
+    //     MOLE_ADU_HINT=<label>. This is the bridge between the agent's eyes and geo placement. ---
+    try {
+      const g2 = createCanvas(W, H); const gx2 = g2.getContext('2d');
+      for (const [tx, ty, img] of tiles) gx2.drawImage(img, (tx - tx0) * 256, (ty - ty0) * 256, 256, 256);
+      gx2.save(); gx2.beginPath(); gx2.rect(0, 0, W, H); poly.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? gx2.lineTo(x, y) : gx2.moveTo(x, y); }); gx2.closePath(); gx2.fillStyle = 'rgba(0,0,0,0.4)'; gx2.fill('evenodd'); gx2.restore();
+      gx2.strokeStyle = '#ffe100'; gx2.lineWidth = 3; gx2.beginPath(); poly.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? gx2.lineTo(x, y) : gx2.moveTo(x, y); }); gx2.closePath(); gx2.stroke();
+      const cellPxG = Math.max(30, (32 * 0.3048) / mppAt(center[1], z));
+      gx2.font = 'bold 12px sans-serif'; gx2.textAlign = 'center';
+      for (const c of groundCells) {
+        const [px, py] = toPx(c.ll[0], c.ll[1]);
+        const tint = c.kind === 'tree' ? 'rgba(60,200,60,0.22)' : c.kind === 'pool' ? 'rgba(0,180,255,0.35)' : c.kind === 'building' ? 'rgba(200,200,200,0.28)' : 'rgba(255,255,80,0.10)';
+        gx2.fillStyle = tint; gx2.fillRect(px - cellPxG / 2, py - cellPxG / 2, cellPxG, cellPxG);
+        gx2.strokeStyle = 'rgba(255,255,255,0.5)'; gx2.lineWidth = 1; gx2.strokeRect(px - cellPxG / 2, py - cellPxG / 2, cellPxG, cellPxG);
+        gx2.strokeStyle = 'rgba(0,0,0,0.85)'; gx2.lineWidth = 3; gx2.strokeText(c.label, px, py + 4);
+        gx2.fillStyle = '#fff'; gx2.fillText(c.label, px, py + 4);
+      }
+      if (aduBox) { gx2.strokeStyle = '#ff3b30'; gx2.lineWidth = 4; gx2.beginPath(); aduBox.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? gx2.lineTo(x, y) : gx2.moveTo(x, y); }); gx2.closePath(); gx2.stroke(); }
+      // Zoom the grid image into the developed area (house + surroundings) so features the agent must
+      // judge — especially a pool/patio — are large and unmistakable. Center on the house; window ~300x180 ft.
+      const hcog = buildings.length ? turf.centroid(buildings.sort((a, b) => turf.area(b) - turf.area(a))[0]).geometry.coordinates : center;
+      const [hcx, hcy] = toPx(hcog[0], hcog[1]);
+      const winW = Math.min(W, (300 * 0.3048) / mppAt(center[1], z));
+      const winH = Math.min(H, (180 * 0.3048) / mppAt(center[1], z));
+      let sx = Math.max(0, Math.min(W - winW, hcx - winW / 2));
+      let sy = Math.max(0, Math.min(H - winH, hcy - winH / 2));
+      const ZW = 1200, ZH = Math.round(ZW * winH / winW);
+      const zc = createCanvas(ZW, ZH); const zx = zc.getContext('2d');
+      zx.imageSmoothingEnabled = true; zx.drawImage(g2, sx, sy, winW, winH, 0, 0, ZW, ZH);
+      const gridOut = OUT.replace(/\.png$/i, '-grid.png');
+      fs.writeFileSync(gridOut, zc.toBuffer('image/png'));
+      out.gridImage = path.basename(gridOut);
+    } catch (e) { out.gridImageError = String(e.message || e); }
+
     emit('sitemap', { status: 'ok', durationMs: Date.now() - t0, attributes: { pid, buildableAreaSqFt: out.buildableAreaSqFt, aduFits: !!out.aduFitsSqFt, aduSource: out.aduSource, zoom: z } });
   } catch (e) {
     out.ok = false; out.error = String(e && e.message ? e.message : e);
