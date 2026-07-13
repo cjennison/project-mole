@@ -58,7 +58,7 @@ async function parcel({ lon, lat }) {
   let f = null, strategy = null;
 
   const runQuery = async (where) => {
-    const u = `${GRANIT}/1/query?${qs({ where, outFields: '*', returnGeometry: 'false', f: 'json' })}`;
+    const u = `${GRANIT}/1/query?${qs({ where, outFields: '*', returnGeometry: 'true', outSR: 4326, f: 'json' })}`;
     return (await j(u)).features || [];
   };
   // 1. exact street + town
@@ -100,6 +100,17 @@ async function parcel({ lon, lat }) {
   if (!out.parcel.addressMatch) {
     out.parcel.warning = `Input street number ${houseNum || '?'} did not match the resolved parcel's address (${a.StreetAddress}). The queried address may not be a distinct parcel, or the geocode landed on an adjacent lot. VERIFY before relying on parcel-specific figures.`;
   }
+  // Reliable interior query point from the parcel geometry (the Census geocode can be
+  // >150m off; all point-in-polygon queries should use this instead).
+  try {
+    const ring = f.geometry?.rings?.[0];
+    if (ring && ring.length) {
+      const pts = ring.slice(0, -1);
+      const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+      const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+      out.parcel.center = { lon: cx, lat: cy };
+    }
+  } catch {}
   try {
     const g = await j(`${GRANIT}/1/query?${qs({ where: `PID='${a.PID}' AND Town='${a.Town}'`,
       outFields: 'PID', returnGeometry: 'true', outSR: 102686, f: 'json' })}`);
@@ -237,11 +248,15 @@ async function environmental({ lon, lat }) {
     const gc = await step('geocode', () => geocode());
     if (!gc) throw new Error('geocode failed — cannot continue');
     const p = (await step('parcel', () => parcel(gc))) || {};
-    await step('zoning', () => zoning(gc, p.town));
-    await step('flood', () => flood(gc));
-    await step('shoreland', () => shoreland(gc));
-    await step('wetlands', () => wetlands(gc));
-    await step('environmental', () => environmental(gc));
+    // Use the parcel interior point (not the raw geocode, which can be >150m off) for all
+    // point-in-polygon queries. Fall back to the geocode if parcel geometry was unavailable.
+    const qpt = p.center || gc;
+    if (p.center) out.queryPoint = p.center;
+    await step('zoning', () => zoning(qpt, p.town));
+    await step('flood', () => flood(qpt));
+    await step('shoreland', () => shoreland(qpt));
+    await step('wetlands', () => wetlands(qpt));
+    await step('environmental', () => environmental(qpt));
     if (p.pid && /-/.test(p.pid)) { const [m, l] = p.pid.split('-'); out.vgsiHint = { map: m, lot: l }; }
     emit('collect_done', { status: 'ok', attributes: {
       pid: out.parcel?.pid, district: out.zoning?.district,

@@ -200,18 +200,36 @@ https://services1.arcgis.com/aguSsLS841Hp3EC4/ArcGIS/rest/services/NH_Atlas_Zoni
 
 ---
 
-## Step 9 — Site-map image (effective buildable area) → tools/sitemap.cjs ✅
-Renders a static PNG: aerial imagery + parcel outline + setback-based buildable envelope +
-a sample 900 sqft ADU footprint. Deps: `@turf/turf` (geometry) + `@napi-rs/canvas` (raster).
-- **Aerial imagery:** Esri **World Imagery XYZ tiles** (no API key):
-  `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}`
-  - ⚠️ Use tiles, NOT the MapServer `export` op (that endpoint intermittently returns HTML).
-  - ⚠️ Max real-imagery zoom here is **~19**; z≥20 returns "Map data not yet available"
-    placeholder tiles (still valid PNGs, so cap the start zoom at 19).
-- **Buildable envelope:** `turf.buffer(parcel, -maxSetbackFt, {units:'feet'})` — a conservative
-  uniform inset by the largest of front/side/rear setbacks (from the NH Zoning Atlas).
-- Usage: `node tools/sitemap.cjs "<address>" [out.png]` → `reports/<slug>-sitemap.png`.
-- ✅ Tested `1335 River Rd`: buildable ≈ 7,804 sf of 25,735 sf lot; 900 sf ADU fits.
+## Step 9 — Site-map image (effective buildable area) → tools/sitemap.cjs ✅ (v2)
+Renders a static PNG: aerial + parcel + **per-edge** setback buildable envelope +
+building carve-out + a sample ADU auto-placed in the open yard. Deps: `@turf/turf` + `@napi-rs/canvas`.
+- **Aerial:** Esri **World Imagery XYZ tiles** (no key):
+  `.../World_Imagery/MapServer/tile/{z}/{y}/{x}`. Use tiles NOT the `export` op (export
+  returns HTML intermittently). Cap start zoom at **19** (z≥20 = "no data" placeholder tiles).
+- **Per-edge setbacks:** the **front** edge is detected as the parcel edge nearest a mapped
+  road (**Census TIGERweb Transportation, layer 8 = Local Roads**:
+  `https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer/8`);
+  **rear** = the edge whose midpoint is farthest from the front; the rest are **sides**. The
+  envelope is built by subtracting each edge's own setback strip (`turf.buffer(edgeLine, s)`
+  then `turf.difference`), giving a realistic F25/S20/R30 envelope instead of a uniform inset.
+- **Building carve:** **FEMA USA Structures** footprints
+  `https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/USA_Structures_View/FeatureServer/0`
+  — query near the parcel, keep those intersecting it, carve each + a 5 ft separation buffer.
+  ⚠️ This layer is often **registered ~10 m off** the Esri imagery, so for some parcels no
+  footprint matches and the house is NOT carved (reported as `buildingsCarved: 0`). Honest
+  limitation — don't fabricate a footprint.
+- **ADU placement:** grid-search the largest buildable piece for a 30×30 ft (900 sf) square
+  that fits and is farthest from the front edge (→ rear/side yard).
+- ✅ Tested `1335 River Rd`: per-edge buildable ≈ 11,927 sf; 900 sf ADU placed in the side yard.
+
+> **Geocode-offset gotcha (fixed in collect.mjs + sitemap.cjs):** the US Census geocode point
+> can be **>150 m off** the actual parcel (observed 1335 River Rd: ~170 m). Resolve the parcel
+> by exact street address, then use the **parcel centroid** as the interior query point for all
+> point-in-polygon lookups (zoning/flood/shoreland/wetlands/environmental) — never the raw geocode.
+
+## Step 10 — Roads (front-edge detection) → Census TIGERweb
+See Step 9. Layer 8 (Local Roads) covers residential streets; primary/secondary layers
+(0–6) miss most addresses. Query by point + `distance` around the parcel centroid.
 | Code | Meaning | Confidence |
 |---|---|---|
 | TownID 4134 | Manchester | ✅ |

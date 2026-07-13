@@ -12,13 +12,15 @@ sewer/water at the tap (§7).
 ## Effective buildable area
 ![Effective buildable area for 1335 River Road](1335-river-road-manchester-nh-sitemap.png)
 
-*Yellow = parcel boundary · green = effective buildable area after a conservative 30 ft setback
-inset · red = a sample 900 sq ft ADU footprint (illustrative placement) · blue dot = existing
-house. Buildable area ≈ **7,804 sq ft** of the 25,735 sq ft lot. The green envelope uses a
-uniform 30 ft inset (the largest of the front/side/rear setbacks) so it is conservative; the
-actual side-yard buildable strip is a bit wider (side setback is 20 ft). Final ADU placement
-must also sit ≥5 ft from the primary structure, out of the front yard, and clear the existing
-driveway — confirm with a site plan.*
+*Yellow = parcel boundary · cyan = detected front/street edge · green = effective buildable
+area using **per-edge setbacks** (front 25 ft / side 20 ft / rear 30 ft) · red = a sample 900 sq
+ft ADU auto-placed in the open side/rear yard · blue dot = house. Buildable area ≈ **11,927 sq
+ft** of the 25,735 sq ft lot. The front edge is detected as the parcel edge nearest a mapped
+road (Census TIGER). **Note:** the existing house footprint is not carved out here — the
+national building-footprint layer (FEMA USA Structures) is registered ~10 m off the aerial for
+this parcel, so it was not reliably matched; the green area therefore still includes the house
+pad. Final ADU siting must sit ≥5 ft from the primary structure, out of the front yard, and
+clear the driveway — confirm with a site plan.*
 
 ---
 
@@ -60,7 +62,7 @@ driveway — confirm with a site plan.*
 - **Adding a 900 sq ft ADU** + pad/walkway (~1,300 sq ft) → total ≈ 20% coverage — well under 40%. ✅
 - **FAR:** max floor area 25,740 × 0.3 = 7,722 sq ft; existing ~2,528 sq ft finished. ✅
 - **Setbacks** F25 / S20 / R30 ft on a 272 × 137 ft lot leave a large rear/side envelope
-  (≈ 7,804 sq ft after a conservative uniform 30 ft inset — see map).
+  (≈ 11,927 sq ft using per-edge setbacks — see map).
 - **Conclusion:** a 900 sq ft / 2-bedroom ADU fits **by-right**, pending confirmed sewer/water.
 
 ---
