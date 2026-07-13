@@ -91,12 +91,42 @@ great pond, or designated river within **250 ft**? Use a distance-buffered point
 
 ---
 
-## Step 6 — Zoning district → town GIS (per-town; not statewide)
-- Manchester GIS viewer: `https://www.manchesternh.gov/Departments/Planning-and-Comm-Dev/GIS/GIS-Viewer` (DNN page, VIEWSTATE postback → the map app URL/service is embedded).
-- No public statewide zoning layer; must locate each town's zoning MapServer/FeatureServer
-  or read the zoning map PDF. TODO: find Manchester's hosted zoning service.
-- Cross-check district against the zoning ordinance dimensional table (setbacks, min lot,
-  coverage, height) — those are in the ordinance PDF (fetchable).
+## Step 6 — Zoning district + ALL dimensional/ADU rules → NH Zoning Atlas ✅ (statewide!)
+**This is the highest-value tool in the project — statewide, per-district, machine-readable.**
+**Endpoint:**
+```
+https://services1.arcgis.com/aguSsLS841Hp3EC4/ArcGIS/rest/services/NH_Atlas_Zoning_Districts_Buildable/FeatureServer/0
+```
+- Polygon layer; query by point or envelope (same pattern as parcels). The "Buildable"
+  version clips out non-buildable slivers, so a rooftop point can miss → **fall back to a
+  small envelope** and pick the polygon(s) whose `Jurisdiction` = the town.
+- ~170 fields. The ones that matter for ADUs:
+  - `Jurisdiction`, `AbbreviatedDistrict`, `Full_District_Name`, `Type_of_Zoning_District`
+  - `F1_Family_Treatment` (is single-family allowed → ADU-by-right test)
+  - **`Accessory_Dwelling_Unit__ADU__Treatment`** (Allowed / Conditional / Public Hearing / Prohibited)
+  - `Detached_ADU_Treatment__if_allowed_`, `ADU_Max___Per_Lot`, `ADU_Owner_Occupancy_Required`,
+    `ADU_Min___Parking_Spaces__Additional_to_Main_Unit_`, `ADU_Max_Size__SF_`,
+    `ADU_Max___Bedrooms_Per_Unit`, `ADU_Min_Lot__acres___additional_to_main_unit_`
+  - Single-family dimensional: `F1_Family_Min_Lot__ACRES_`, `F1_Family_Front/Side/Rear_Setback____of_feet_`,
+    `F1_Family_Min_Road_Frontage`, `F1_Family_Max_Lot_Coverage___Buildings___Impervious_Surface____`,
+    `F1_Family_Max_Height____of_feet_`, `F1_Family_Floor_to_Area_Ratio`
+- ✅ Tested near `1335 River Rd`: district **R-1A** (variants R-1A/Sewer, R-1A/Water,
+  R-1A/Water and Sewer — dimensions identical). Values:
+  - SF min lot **0.27 ac**, front **25 ft**, side **20 ft**, rear **30 ft**, frontage **100 ft**,
+    max coverage (bldg+impervious) **40%**, max height **35 ft / 2.5 stories**, FAR **0.3**.
+  - ADU: max **900 sqft**, **≤2 bedrooms**, **1 per lot**, **owner-occupancy required**,
+    +1 parking, no extra min lot.
+- ⚠️ **CRITICAL RECONCILIATION:** the Atlas records ADU Treatment = **"Public Hearing"** for
+  R-1A, but that's a *pre-HB 577 snapshot*. Under current **RSA 674:72 (eff. 7/1/2025)** one
+  ADU is now **by right** wherever single-family is allowed — the statute overrides the
+  Atlas's "Public Hearing". **Always let current state law win over the Atlas for the
+  permit-path question; use the Atlas for the dimensional numbers.**
+- Sibling layers exist (e.g. `NH_Atlas_Zoning_Districts` non-buildable, statewide zoning
+  FeatureServers under other org ids) — the Buildable one above is the richest.
+
+### (old Step 6 town-GIS notes — fallback only)
+- Manchester GIS viewer: `https://www.manchesternh.gov/Departments/Planning-and-Comm-Dev/GIS/GIS-Viewer` (DNN/VIEWSTATE postback → Playwright). Use only to confirm the exact
+  district boundary if the Atlas polygon is ambiguous at a lot line.
 
 ---
 
@@ -123,9 +153,12 @@ great pond, or designated river within **250 ft**? Use a distance-buffered point
 | SLU/SLUC 11 | Single-family residential (NH State Land Use) | ⚠️ verify vs SLU table |
 | FEMA FLD_ZONE X | Minimal flood hazard (not SFHA) | ✅ |
 | FEMA SFHA_TF F | Not in Special Flood Hazard Area | ✅ |
+| Zoning district R-1A | Residential One-Family Medium Density (Manchester) | ✅ |
 
 ## Open API TODOs
-- [ ] NH GRANIT hydrography service path (for shoreland distance math).
-- [ ] Manchester hosted zoning service (or parse zoning map PDF).
+- [x] NH GRANIT hydrography → IWR/WaterResources (shoreland buffers L13-25, 4th-order L8).
+- [x] Statewide zoning + dimensional + ADU rules → NH Zoning Atlas FeatureServer.
 - [ ] Confirm NH SLU code table (map SLUC → land-use description).
-- [ ] VGSI Manchester internal pid for 222-83 (owner + assessed value).
+- [ ] VGSI Manchester internal pid for 222-83 (owner + assessed value + sewer flag).
+- [ ] NHDES OneStop septic/well lookup (expect none if public sewer).
+- [ ] Manchester impact-fee schedule amount for a new dwelling unit.
