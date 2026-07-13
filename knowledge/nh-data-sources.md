@@ -200,7 +200,18 @@ https://services1.arcgis.com/aguSsLS841Hp3EC4/ArcGIS/rest/services/NH_Atlas_Zoni
 
 ---
 
-## Reference codes captured
+## Step 9 — Site-map image (effective buildable area) → tools/sitemap.cjs ✅
+Renders a static PNG: aerial imagery + parcel outline + setback-based buildable envelope +
+a sample 900 sqft ADU footprint. Deps: `@turf/turf` (geometry) + `@napi-rs/canvas` (raster).
+- **Aerial imagery:** Esri **World Imagery XYZ tiles** (no API key):
+  `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}`
+  - ⚠️ Use tiles, NOT the MapServer `export` op (that endpoint intermittently returns HTML).
+  - ⚠️ Max real-imagery zoom here is **~19**; z≥20 returns "Map data not yet available"
+    placeholder tiles (still valid PNGs, so cap the start zoom at 19).
+- **Buildable envelope:** `turf.buffer(parcel, -maxSetbackFt, {units:'feet'})` — a conservative
+  uniform inset by the largest of front/side/rear setbacks (from the NH Zoning Atlas).
+- Usage: `node tools/sitemap.cjs "<address>" [out.png]` → `reports/<slug>-sitemap.png`.
+- ✅ Tested `1335 River Rd`: buildable ≈ 7,804 sf of 25,735 sf lot; 900 sf ADU fits.
 | Code | Meaning | Confidence |
 |---|---|---|
 | TownID 4134 | Manchester | ✅ |

@@ -24,6 +24,10 @@ RUN npm install -g @github/copilot
 # Install Playwright MCP and Playwright browser management
 RUN npm install -g @playwright/mcp@latest playwright
 
+# Install tool dependencies (turf for geometry, napi canvas for the site-map renderer).
+# Resolved at runtime via NODE_PATH=/usr/local/lib/node_modules (set below) for the .cjs tools.
+RUN npm install -g @turf/turf @napi-rs/canvas
+
 # Install Playwright system dependencies and Chromium browser
 RUN npx playwright install-deps chromium && \
     npx playwright install chromium

@@ -41,6 +41,14 @@ those. Telemetry works with no Azure configured — do NOT skip it.
    Use `vgsiHint.map`/`vgsiHint.lot` from step 1. The town-slug for Manchester is
    `manchesternh` (pattern: `<town>nh`). If VGSI fails, continue without it.
 
+2b. **Render the site map** (aerial + parcel + buildable envelope + sample ADU). Run:
+   ```
+   node tools/sitemap.cjs "<ADDRESS>"
+   ```
+   This writes `reports/<slug>-sitemap.png` and prints `buildableAreaSqFt` / `aduFitsSqFt`.
+   **Embed it in the report** with `![Effective buildable area](<slug>-sitemap.png)` and use its
+   numbers in the buildable-envelope section. If it fails, continue without the image.
+
 3. **Apply the rules** (full detail in `knowledge/nh-adu-playbook.md` and
    `knowledge/nh-data-sources.md` — read them):
    - **NH ADU law (RSA 674:71–73, HB 577, eff. 7/1/2025):** one ADU is allowed **by right**
@@ -65,6 +73,7 @@ those. Telemetry works with no Azure configured — do NOT skip it.
 5. **Write the report** to `reports/<slug>.md` using this structure:
    - Header: address, parcel PID, date, one-line verdict (Feasible by-right / Conditional /
      Not feasible / Needs verification).
+   - **Effective buildable area**: embed the site-map image from step 2b with a caption.
    - Property snapshot (owner, lot size, assessed value, use, zoning district).
    - The 7 feasibility gates with ✅/⚠️/❌ and the evidence + source for each.
    - Buildable-envelope calculation.

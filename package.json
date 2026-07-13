@@ -1,0 +1,11 @@
+{
+  "name": "project-mole-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NH ADU feasibility tools (data collector, assessor scraper, site-map renderer, telemetry)",
+  "type": "commonjs",
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.65",
+    "@turf/turf": "^7.1.0"
+  }
+}
