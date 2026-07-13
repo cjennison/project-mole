@@ -1,0 +1,47 @@
+# MOLE agent worker image for Azure Container Apps.
+# Runs GitHub Copilot CLI (Claude Opus 4.8) as the actual agent: it drives the deterministic tools,
+# LOOKS at the site map it renders, and self-corrects ADU placement. Includes Playwright + Chromium
+# so the agent can browse public portals when needed. NO Azure OpenAI.
+FROM node:24-bookworm-slim
+
+# System deps + fonts (canvas needs fonts to draw the map labels/legend/scale).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg git ca-certificates jq fontconfig fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+# gh CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
+    gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
+    tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
+
+# Copilot CLI + Playwright MCP + Playwright (global tooling).
+RUN npm install -g @github/copilot @playwright/mcp@latest playwright
+RUN npx playwright install-deps chromium && npx playwright install chromium
+
+WORKDIR /workspace
+
+# App dependencies (turf, @napi-rs/canvas, azure SDKs) resolved from /workspace/node_modules.
+COPY package.json package-lock.json ./
+RUN npm install --omit=dev --no-audit --no-fund
+
+# The agent's brain + tools + worker.
+COPY AGENTS.md ./AGENTS.md
+COPY knowledge/ ./knowledge/
+COPY tools/ ./tools/
+COPY lib/ ./lib/
+COPY worker/ ./worker/
+
+# Default MCP config (seeded into ~/.copilot at container start).
+COPY config/mcp.json /etc/copilot/mcp.json
+
+# Entrypoint: seed Copilot config/trust/auth, then run the queue worker.
+COPY scripts/worker-entrypoint.sh /worker-entrypoint.sh
+RUN sed -i 's/\r$//' /worker-entrypoint.sh && chmod +x /worker-entrypoint.sh
+
+ENV NODE_ENV=production \
+    COPILOT_HOME=/root/.copilot \
+    MOLE_AGENT_MODEL=claude-opus-4.8
+
+ENTRYPOINT ["/worker-entrypoint.sh"]
