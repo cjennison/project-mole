@@ -4,8 +4,26 @@
 // Prints a JSON blob of raw facts gathered from public REST APIs (no LLM, no browser).
 // Endpoints & rationale are documented in knowledge/nh-data-sources.md.
 
+import { emit, flush } from './telemetry.mjs';
+
 const ADDRESS = process.argv.slice(2).join(' ').trim();
 if (!ADDRESS) { console.error('Usage: node collect.mjs "<address>"'); process.exit(1); }
+process.env.MOLE_ADDRESS = process.env.MOLE_ADDRESS || ADDRESS;
+
+// Local phase wrapper: emits start/ok|error telemetry AND records gaps into out.errors.
+async function step(name, fn) {
+  const t0 = Date.now();
+  emit(name, { status: 'start' });
+  try {
+    const r = await fn();
+    emit(name, { status: 'ok', durationMs: Date.now() - t0 });
+    return r;
+  } catch (e) {
+    emit(name, { status: 'error', durationMs: Date.now() - t0, error: e });
+    out.errors[name] = String(e && e.message ? e.message : e);
+    return undefined;
+  }
+}
 
 const j = async (url) => {
   const r = await fetch(url, { headers: { 'User-Agent': 'project-mole/1.0' } });
@@ -214,18 +232,28 @@ async function environmental({ lon, lat }) {
 }
 
 (async () => {
+  emit('run_start', { status: 'start', attributes: { tool: 'collect', address: ADDRESS } });
   try {
-    const gc = await geocode();
-    const p = await parcel(gc).catch(e => { out.errors.parcel = String(e); return {}; });
-    await zoning(gc, p.town).catch(e => { out.errors.zoning = String(e); });
-    await flood(gc).catch(e => { out.errors.flood = String(e); });
-    await shoreland(gc).catch(e => { out.errors.shoreland = String(e); });
-    await wetlands(gc).catch(e => { out.errors.wetlands = String(e); });
-    await environmental(gc).catch(e => { out.errors.environmental = String(e); });
+    const gc = await step('geocode', () => geocode());
+    if (!gc) throw new Error('geocode failed — cannot continue');
+    const p = (await step('parcel', () => parcel(gc))) || {};
+    await step('zoning', () => zoning(gc, p.town));
+    await step('flood', () => flood(gc));
+    await step('shoreland', () => shoreland(gc));
+    await step('wetlands', () => wetlands(gc));
+    await step('environmental', () => environmental(gc));
     if (p.pid && /-/.test(p.pid)) { const [m, l] = p.pid.split('-'); out.vgsiHint = { map: m, lot: l }; }
+    emit('collect_done', { status: 'ok', attributes: {
+      pid: out.parcel?.pid, district: out.zoning?.district,
+      addressMatch: out.parcel?.addressMatch, matchStrategy: out.parcel?.matchStrategy,
+      floodZone: out.flood?.zone, shorelandApplies: out.shoreland?.applies,
+      dataGaps: Object.keys(out.errors).length,
+    } });
   } catch (e) {
     out.fatal = String(e);
+    emit('collect_done', { status: 'error', error: e });
   } finally {
+    await flush();
     console.log(JSON.stringify(out, null, 2));
   }
 })();

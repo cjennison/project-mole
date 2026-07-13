@@ -10,6 +10,17 @@ Input: one NH street address (from the `ADDRESS` env var or the prompt).
 Output: a Markdown feasibility report written to `reports/<slug>.md` (slug = address,
 lowercased, non-alphanumerics → `-`). Also print a short summary to stdout.
 
+## Emit telemetry as you go
+Mark your progress so a dashboard can track the run. After each major milestone, run:
+```
+node tools/telemetry.mjs <event> <status> [key=value ...]
+```
+Emit at least: `analysis start` (before you reason over the data), `assessor ok|error`
+(after the VGSI step, with `pid=<pid>`), `report_write start` then `report_write ok`
+(with `slug=<slug>` and `verdict=<by-right|conditional|not-feasible|needs-verification>`).
+`tools/collect.mjs` already emits its own per-phase telemetry, so you don't need to repeat
+those. Telemetry works with no Azure configured — do NOT skip it.
+
 ## How to do it (follow in order)
 
 1. **Collect the deterministic data.** Run:

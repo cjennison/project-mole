@@ -1,0 +1,10 @@
+node_modules/
+.env
+*.log
+
+# Per-run telemetry output (durable run artifacts, not source)
+reports/telemetry/
+
+# Temp/debug scratch
+debug_*.mjs
+tmp/

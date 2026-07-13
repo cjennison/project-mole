@@ -44,11 +44,28 @@ fi
 if [ -n "$ADDRESS" ]; then
     echo "🏠 ADU feasibility run for: $ADDRESS"
     mkdir -p /workspace/reports
+
+    # ── Telemetry run context (works with NO Azure; ships to App Insights only if
+    #    APPLICATIONINSIGHTS_CONNECTION_STRING is set). Shared runId across all child procs.
+    export MOLE_RUN_ID="${MOLE_RUN_ID:-$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo run-$$-$(date +%s))}"
+    export MOLE_ADDRESS="$ADDRESS"
+    export MOLE_TELEMETRY_DIR="${MOLE_TELEMETRY_DIR:-/workspace/reports/telemetry}"
+    echo "📈 Telemetry runId=$MOLE_RUN_ID → $MOLE_TELEMETRY_DIR/$MOLE_RUN_ID.jsonl"
+    node /workspace/tools/telemetry.mjs run_start start tool=entrypoint 2>/dev/null || true
+
     PROMPT="You have been invoked to produce an NH ADU feasibility report. \
 Follow the instructions in AGENTS.md exactly. The target address is: \"$ADDRESS\". \
 Collect data with tools/collect.mjs and tools/vgsi.cjs, apply NH + Manchester law, and \
 write the report to reports/ then print a short summary. Work autonomously; do not ask questions."
-    exec copilot --allow-all-tools --prompt "$PROMPT"
+    copilot --allow-all-tools --prompt "$PROMPT"
+    RC=$?
+
+    if [ "$RC" -eq 0 ]; then
+        node /workspace/tools/telemetry.mjs run_end ok exitCode=0 2>/dev/null || true
+    else
+        node /workspace/tools/telemetry.mjs run_end error exitCode="$RC" 2>/dev/null || true
+    fi
+    exit "$RC"
 elif [ -n "$COPILOT_PROMPT" ]; then
     echo "▶  Running with prompt: $COPILOT_PROMPT"
     exec copilot --allow-all-tools --prompt "$COPILOT_PROMPT"
