@@ -210,17 +210,27 @@ allowed with **only a building permit** (no variance/special exception) under RS
   officially confirmed by NHDES layer); no wetlands within 100 ft.
 - Likely public sewer (per listing) → no septic redesign.
 
+**Agent completed lookups (this run):** parcel (GRANIT), zoning+dimensional+ADU rules
+(NH Zoning Atlas), flood (FEMA), shoreland (GRANIT + official NHDES layer), wetlands,
+environmental due-diligence + groundwater (NHDES), parcel geometry, **official assessor
+card via container Playwright** (owner, $397,400 assessment, Use 1010 SINGLE FAM, 25,740
+sqft, deed Bk/Pg 9775/1322).
+
+**Automation boundary hit:** **NHDES OneStop** (septic/well records) is **Akamai
+bot-protected** — blocks both HTTP and real headless Chromium. So confirming
+septic-vs-sewer from state records is currently a **🧑 human / 📨 records-request** step
+(or needs a stealth browser). Public sewer is inferred from the listing + urban sewered
+district; flag "confirm at tap".
+
 **What a human still MUST do (unavoidable):**
-1. 🧑 Confirm public **sewer AND water** at the tap (Manchester EPD / Water Works) — the one
-   open feasibility item; 🤖 pre-checked via listing but not officially confirmed.
+1. 🧑 Confirm public **sewer AND water** at the tap (Manchester EPD / Water Works) — OneStop
+   is bot-blocked, so this can't be auto-verified from NHDES right now.
 2. 🧑/📨 Building permit + plans (2021 IRC/IBC); pay impact fee (Art. 13).
 3. 📨 Record **owner-occupancy deed restriction**.
 4. 📨→🧑 **NH811 locate** before excavation; utilities physically mark out.
 5. 🧑 On-site inspections (footing, framing, electrical, plumbing, insulation, final).
 
-**Agent-only remaining lookups (need Playwright container, not blocking feasibility):**
-- VGSI assessor card → owner name, official assessed value, sewer field.
-- NHDES OneStop → confirm no septic/well records on file.
-
-**Bottom line:** the agent reduced a multi-day research scramble to a ~5-item human checklist
-and produced a defensible "feasible by-right" determination for this address.
+**Bottom line:** the agent auto-collected ~90% of the pre-build research (parcel, zoning,
+ADU rules, all environmental gates, official assessor data) and produced a defensible
+"feasible by-right" determination — leaving the human a ~5-item action checklist plus one
+bot-blocked confirmation.

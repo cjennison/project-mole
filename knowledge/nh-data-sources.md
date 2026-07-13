@@ -144,9 +144,16 @@ https://services1.arcgis.com/aguSsLS841Hp3EC4/ArcGIS/rest/services/NH_Atlas_Zoni
   Auto Salvage Yards, Groundwater Classification GA1/GA2, NPDES Outfalls, etc. Point/buffer
   query these to flag nearby contamination — a value-add screen, not core ADU feasibility.
 - ⚠️ **Septic (subsurface) approvals & Well Completion Reports are NOT in the public GIS.**
-  They live in **NHDES OneStop** (`https://www4.des.state.nh.us/OneStop/...`), an ASP.NET app
-  → **Playwright/headless browser** required. Search by address or map-lot. If public
-  sewer/water is confirmed (listing/assessor), expect no records.
+  They live in **NHDES OneStop** (`https://www4.des.state.nh.us/DESOnestop/BasicSearch.aspx`).
+  - ❌ **OneStop is Akamai bot-protected** — returns **"Access Denied"** to `Invoke-WebRequest`
+    AND to the container's real headless Chromium (tested this session). Standard Playwright
+    is blocked. Options: (a) anti-bot/stealth browser (playwright-extra + stealth, residential
+    IP), (b) treat as a **🧑 human / 📨 records-request** step, or (c) wait for NHDES's new
+    **NHEnviro** platform (launching Aug 2026) which may expose APIs.
+  - The only well data in NHDES ArcGIS is `Hosted/NH_NGWMN_Wells` = groundwater *monitoring*
+    wells (not private drinking wells) — not useful for parcel water/sewer determination.
+  - **Practical fallback:** infer public sewer/water from the listing + assessor card + the
+    fact that the lot sits in a fully-sewered urban district; flag "confirm at tap" for a human.
 
 ## Step 5b — Assessor card (owner, value, use, lot, sales) → VGSI via Playwright ✅ WORKS
 - Base: `https://gis.vgsi.com/manchesternh/` (path assets `/ManchesterNH/`). ASP.NET postback.
@@ -191,15 +198,19 @@ https://services1.arcgis.com/aguSsLS841Hp3EC4/ArcGIS/rest/services/NH_Atlas_Zoni
 |---|---|---|
 | TownID 4134 | Manchester | ✅ |
 | CountyId 6 | Hillsborough County | ✅ |
-| SLU/SLUC 11 | Single-family residential (NH State Land Use) | ⚠️ verify vs SLU table |
+| SLU/SLUC 11 | Single-family residential (NH State Land Use) | ✅ (VGSI Use 1010 confirms) |
 | FEMA FLD_ZONE X | Minimal flood hazard (not SFHA) | ✅ |
 | FEMA SFHA_TF F | Not in Special Flood Hazard Area | ✅ |
 | Zoning district R-1A | Residential One-Family Medium Density (Manchester) | ✅ |
+| Assessing Use Code 1010 | Single-family (VGSI) | ✅ |
 
 ## Open API TODOs
 - [x] NH GRANIT hydrography → IWR/WaterResources (shoreland buffers L13-25, 4th-order L8).
 - [x] Statewide zoning + dimensional + ADU rules → NH Zoning Atlas FeatureServer.
-- [ ] Confirm NH SLU code table (map SLUC → land-use description).
-- [ ] VGSI Manchester internal pid for 222-83 (owner + assessed value + sewer flag).
-- [ ] NHDES OneStop septic/well lookup (expect none if public sewer).
-- [ ] Manchester impact-fee schedule amount for a new dwelling unit.
+- [x] SLU/Use code confirmed (VGSI Use 1010 = single-family = SLU 11).
+- [x] VGSI assessor card (pid 6246): owner, $397,400 assessment, 25,740 sqft, deed Bk/Pg 9775/1322.
+- [x] Environmental due-diligence + groundwater (NHDES DES_Data_Public) — site clean, GA2.
+- [ ] NHDES OneStop septic/well — **BLOCKED by Akamai** (needs stealth browser or records request).
+- [~] Deeds: have Book/Page **9775/1322** (05/16/2024) from VGSI; full deed doc = Hillsborough
+      Registry of Deeds (separate portal; may also be bot-protected).
+- [ ] Manchester impact-fee exact ADU dollar amount (formulae captured; confirm $ with PCD).
