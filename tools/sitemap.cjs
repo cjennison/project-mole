@@ -146,7 +146,19 @@ async function fetchTile(z, x, y) {
     //     square footprint that fits AND is farthest from the front edge (rear/side yard). ---
     const side = Math.sqrt(Math.min(sb.aduMaxSqFt || 900, 900));
     const halfDiag = (side / 2) * Math.SQRT2;
-    const mkBox = (ctr) => turf.polygon([[45, 135, 225, 315, 45].map(bd => turf.destination(ctr, halfDiag, bd, { units: 'feet' }).geometry.coordinates)]);
+    // Align the ADU square to the parcel's principal (longest-edge) axis so it sits parallel to the
+    // lot/house instead of north-up. A square is symmetric every 90°, so normalise the bearing to 0–90.
+    const principalBearing = (pg) => {
+      const ring = pg.geometry.coordinates[0]; let b = 0, best = -1;
+      for (let i = 0; i < ring.length - 1; i++) {
+        const d = turf.distance(turf.point(ring[i]), turf.point(ring[i + 1]), { units: 'feet' });
+        if (d > best) { best = d; b = turf.bearing(turf.point(ring[i]), turf.point(ring[i + 1])); }
+      }
+      return ((b % 90) + 90) % 90;
+    };
+    const aduRot = principalBearing(poly);
+    out.aduRotationDeg = +aduRot.toFixed(1);
+    const mkBox = (ctr) => turf.polygon([[45, 135, 225, 315, 45].map(bd => turf.destination(ctr, halfDiag, bd + aduRot, { units: 'feet' }).geometry.coordinates)]);
     let aduBox = null;
     if (biggest) {
       const [x0, y0, x1, y1] = turf.bbox(biggest);
@@ -165,12 +177,12 @@ async function fetchTile(z, x, y) {
 
     // --- Imagery tiles over padded parcel bbox ---
     const [minLon, minLat, maxLon, maxLat] = turf.bbox(poly);
-    const padLon = (maxLon - minLon) * 0.35, padLat = (maxLat - minLat) * 0.35;
+    const padLon = (maxLon - minLon) * 0.25, padLat = (maxLat - minLat) * 0.25;
     const bb = { minLon: minLon - padLon, minLat: minLat - padLat, maxLon: maxLon + padLon, maxLat: maxLat + padLat };
     let z = 19, tx0, tx1, ty0, ty1, tiles = null;
     for (; z >= 15; z--) {
       const [gx0, gy0] = globalPx(bb.minLon, bb.maxLat, z), [gx1, gy1] = globalPx(bb.maxLon, bb.minLat, z);
-      if (Math.max(gx1 - gx0, gy1 - gy0) > 1300) continue;
+      if (Math.max(gx1 - gx0, gy1 - gy0) > 2200) continue; // allow z19 for long parcels (crisper for review)
       tx0 = Math.floor(gx0 / 256); tx1 = Math.floor(gx1 / 256); ty0 = Math.floor(gy0 / 256); ty1 = Math.floor(gy1 / 256);
       try { const t = []; for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) t.push([tx, ty, await fetchTile(z, tx, ty)]); tiles = t; break; }
       catch { tiles = null; }
