@@ -4,6 +4,10 @@ FROM node:24-bookworm-slim
 
 WORKDIR /app
 
+# Fonts so the canvas site-map renderer can draw text (labels/legend/scale).
+RUN apt-get update && apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install only production deps (turf, @napi-rs/canvas, azure SDKs). @napi-rs/canvas ships a
 # self-contained prebuilt binary, so no system graphics libraries are required.
 COPY package.json package-lock.json ./

@@ -8,7 +8,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const turf = require('@turf/turf');
-const { createCanvas, loadImage } = require('@napi-rs/canvas');
+const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
+// Register a font so text renders in headless Linux containers (slim images ship no fonts).
+try {
+  const fsx = require('node:fs');
+  for (const p of ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf']) {
+    if (fsx.existsSync(p)) GlobalFonts.registerFromPath(p, 'sans-serif');
+  }
+} catch {}
 let visionMod; try { visionMod = require('./vision.cjs'); } catch {}
 let emit = () => {}, flush = async () => {};
 
