@@ -29,29 +29,58 @@ async function geocode() {
 // ---------- 2. Parcel (NH GRANIT ParcelMosaic) ----------
 const GRANIT = 'https://nhgeodata.unh.edu/nhgeodata/rest/services/CAD/ParcelMosaic/MapServer';
 async function parcel({ lon, lat }) {
-  const d = 0.0007;
-  const env = JSON.stringify({ xmin: lon - d, ymin: lat - d, xmax: lon + d, ymax: lat + d, spatialReference: { wkid: 4326 } });
-  const u = `${GRANIT}/1/query?${qs({ geometry: env, geometryType: 'esriGeometryEnvelope', inSR: 4326,
-    spatialRel: 'esriSpatialRelIntersects', outFields: '*', returnGeometry: 'false', f: 'json' })}`;
-  const data = await j(u);
-  const feats = data.features || [];
-  const houseNum = (ADDRESS.match(/^\s*(\d+)/) || [])[1];
-  let f = feats.find(x => houseNum && String(x.attributes.StreetAddress || '').trim().startsWith(houseNum + ' '));
-  if (!f) f = feats[0];
-  if (!f) throw new Error('no parcel found near point');
+  // The geocoder returns a normalized address like "1341 RIVER RD, MANCHESTER, NH, 03104".
+  // Primary strategy: exact StreetAddress + Town match (most reliable — avoids picking an
+  // adjacent parcel). Fallbacks: LIKE on house number, then point-envelope nearest.
+  const matched = out.geocode?.matched || ADDRESS;
+  const parts = matched.split(',').map(s => s.trim());
+  const streetFull = (parts[0] || '').toUpperCase();
+  const town = (parts[1] || '').toUpperCase();
+  const houseNum = (streetFull.match(/^\s*(\d+)/) || [])[1];
+  let f = null, strategy = null;
+
+  const runQuery = async (where) => {
+    const u = `${GRANIT}/1/query?${qs({ where, outFields: '*', returnGeometry: 'false', f: 'json' })}`;
+    return (await j(u)).features || [];
+  };
+  // 1. exact street + town
+  try {
+    const feats = await runQuery(`StreetAddress='${streetFull}' AND Town='${town}'`);
+    if (feats.length) { f = feats[0]; strategy = 'exact-address'; }
+  } catch (e) { out.errors.parcelExact = String(e); }
+  // 2. house-number LIKE within town
+  if (!f && houseNum && town) {
+    try {
+      const feats = await runQuery(`StreetAddress LIKE '${houseNum} %' AND Town='${town}'`);
+      const streetName = streetFull.replace(/^\d+\s+/, '').split(/\s+/)[0]; // first word of street
+      f = feats.find(x => new RegExp('^' + houseNum + '\\s+' + streetName, 'i').test(x.attributes.StreetAddress || '')) || feats[0];
+      if (f) strategy = 'housenum-like';
+    } catch (e) { out.errors.parcelLike = String(e); }
+  }
+  // 3. point envelope (wider), pick house-number match then first
+  if (!f) {
+    const d = 0.0015;
+    const env = JSON.stringify({ xmin: lon - d, ymin: lat - d, xmax: lon + d, ymax: lat + d, spatialReference: { wkid: 4326 } });
+    const u = `${GRANIT}/1/query?${qs({ geometry: env, geometryType: 'esriGeometryEnvelope', inSR: 4326,
+      spatialRel: 'esriSpatialRelIntersects', outFields: '*', returnGeometry: 'false', f: 'json' })}`;
+    const feats = (await j(u)).features || [];
+    f = feats.find(x => houseNum && String(x.attributes.StreetAddress || '').trim().startsWith(houseNum + ' ')) || feats[0];
+    if (f) strategy = 'envelope-nearest';
+  }
+  if (!f) throw new Error('no parcel found');
+
   const a = f.attributes;
   const areaSqFt = a.Shape_Area || null;
-  const inputNum = (ADDRESS.match(/^\s*(\d+)/) || [])[1];
   const parcelNum = (String(a.StreetAddress || '').match(/^\s*(\d+)/) || [])[1];
   out.parcel = {
     pid: a.PID, town: a.Town, townId: a.TownID, county: a.CountyId, nhGisId: a.NH_GIS_ID,
-    streetAddress: a.StreetAddress, sluc: a.SLUC,
+    streetAddress: a.StreetAddress, sluc: a.SLUC, matchStrategy: strategy,
     areaSqFt: areaSqFt ? Math.round(areaSqFt) : null,
     acres: areaSqFt ? +(areaSqFt / 43560).toFixed(3) : null,
-    addressMatch: !!(inputNum && parcelNum && inputNum === parcelNum),
+    addressMatch: !!(houseNum && parcelNum && houseNum === parcelNum),
   };
   if (!out.parcel.addressMatch) {
-    out.parcel.warning = `Input street number ${inputNum || '?'} did not exactly match the nearest parcel's address (${a.StreetAddress}). The queried address may not be a distinct parcel, or the geocode landed on an adjacent lot. VERIFY before relying on parcel-specific figures.`;
+    out.parcel.warning = `Input street number ${houseNum || '?'} did not match the resolved parcel's address (${a.StreetAddress}). The queried address may not be a distinct parcel, or the geocode landed on an adjacent lot. VERIFY before relying on parcel-specific figures.`;
   }
   try {
     const g = await j(`${GRANIT}/1/query?${qs({ where: `PID='${a.PID}' AND Town='${a.Town}'`,

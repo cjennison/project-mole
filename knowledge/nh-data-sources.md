@@ -29,6 +29,13 @@ https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=<URLE
 ```
 .../MapServer/1/query?where=StreetAddress='1335 RIVER RD' AND Town='MANCHESTER'&outFields=*&returnGeometry=true&outSR=4326&f=json
 ```
+> **Parcel-lookup strategy (tools/collect.mjs):** geocode first (Census gives a *normalized*
+> address like `1341 RIVER RD, MANCHESTER, NH`), then query GRANIT by **exact `StreetAddress`
+> + `Town`** — this reliably hits the right parcel. Fallbacks: `StreetAddress LIKE '<num> %'`
+> filtered by street name, then a widened point-envelope nearest match. A pure point-in-polygon
+> or small-envelope search can grab an *adjacent* parcel (observed: 1341 → wrongly matched
+> 1325); the exact-address query avoids this. `collect.mjs` sets `matchStrategy` + `addressMatch`
+> so the agent can flag low-confidence matches.
 **Query by point** (use a small envelope, point-in-polygon can miss on rooftop coords):
 ```
 .../MapServer/1/query?geometry={xmin,ymin,xmax,ymax}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&f=json
