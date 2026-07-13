@@ -200,55 +200,69 @@ async function fetchTile(z, x, y) {
     const drawLine = (a, b, style, width = 5) => { const [ax, ay] = toPx(a[0], a[1]), [bx, by] = toPx(b[0], b[1]); ctx.save(); ctx.strokeStyle = style; ctx.lineWidth = width; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.restore(); };
     const fromPx = (px, py) => { const n = 256 * 2 ** z; const gx = px + originX, gy = py + originY; return [gx / n * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * gy / n))) * 180 / Math.PI]; };
 
-    // --- FREE local ground classification: sample the raw aerial pixels of each ~32 ft grid cell to
-    //     detect tree canopy / pool-water / building-roof vs open ground. This is reliable (esp. for
-    //     trees) and costs nothing, so it — not the AOAI model — drives ADU placement. Must run BEFORE
-    //     any overlays are drawn onto ctx (masks/tints would corrupt the pixel colors). ---
+    // --- FREE local ground classification (drives ADU placement; no paid vision needed) ---
+    //     Sample the raw aerial pixels of each ~32 ft grid cell to detect tree canopy / pool-water /
+    //     building-roof vs open ground. CRITICAL: classify on a dedicated HIGH-ZOOM (19) canvas, NOT
+    //     the display map — the display zoom can drop to 18 for long parcels, at which coarseness the
+    //     house/pool go undetected and the ADU lands on the pool. At z19 the house is cleanly detected
+    //     and the pool (its grid neighbour) is kept out. We emit the `vision` phase so the UI's aerial
+    //     analysis step always completes even with AOAI off.
+    emit('vision', { status: 'start' });
     const cellCenters = {};   // label -> [lon,lat] (also reused by the optional AOAI grid below)
-    const groundCells = [];   // { label, ll:[lon,lat], cxp, cyp, kind }
-    {
-      const cell = Math.max(38, (32 * 0.3048) / mppAt(center[1], z));
-      const ringPx = poly.geometry.coordinates[0].map(c => toPx(c[0], c[1]));
+    const groundCells = [];   // { label, ll:[lon,lat], kind }
+    try {
+      const zc = 19;
+      const [cgx0, cgy0] = globalPx(minLon, maxLat, zc), [cgx1, cgy1] = globalPx(maxLon, minLat, zc);
+      const ctx0 = Math.floor(cgx0 / 256), ctx1 = Math.floor(cgx1 / 256), cty0 = Math.floor(cgy0 / 256), cty1 = Math.floor(cgy1 / 256);
+      const cW = (ctx1 - ctx0 + 1) * 256, cH = (cty1 - cty0 + 1) * 256, coX = ctx0 * 256, coY = cty0 * 256;
+      const ccv = createCanvas(cW, cH); const cc = ccv.getContext('2d');
+      for (let ty = cty0; ty <= cty1; ty++) for (let tx = ctx0; tx <= ctx1; tx++) cc.drawImage(await fetchTile(zc, tx, ty), (tx - ctx0) * 256, (ty - cty0) * 256, 256, 256);
+      const cToPx = (lon, lat) => { const [gx, gy] = globalPx(lon, lat, zc); return [gx - coX, gy - coY]; };
+      const cFromPx = (px, py) => { const n = 256 * 2 ** zc; return [(px + coX) / n * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * (py + coY) / n))) * 180 / Math.PI]; };
+      const cell = Math.max(38, (32 * 0.3048) / mppAt(center[1], zc));
+      const ringPx = poly.geometry.coordinates[0].map(c => cToPx(c[0], c[1]));
       const pminX = Math.min(...ringPx.map(p => p[0])), pmaxX = Math.max(...ringPx.map(p => p[0]));
       const pminY = Math.min(...ringPx.map(p => p[1])), pmaxY = Math.max(...ringPx.map(p => p[1]));
       const cols = 'ABCDEFGHIJKLMNOPQRSTUVWX';
       const classify = (gx, gy) => {
-        const w = Math.min(cell, W - gx), h = Math.min(cell, H - gy);
+        const w = Math.min(cell, cW - gx), h = Math.min(cell, cH - gy);
         if (w <= 1 || h <= 1) return 'open';
-        const d = ctx.getImageData(Math.max(0, gx), Math.max(0, gy), Math.floor(w), Math.floor(h)).data;
+        const d = cc.getImageData(Math.max(0, gx), Math.max(0, gy), Math.floor(w), Math.floor(h)).data;
         let tree = 0, gray = 0, blue = 0, tot = 0;
         for (let i = 0; i < d.length; i += 16) {
           const r = d[i], g = d[i + 1], b = d[i + 2]; const bright = (r + g + b) / 3; const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-          if (g > r + 4 && g > b + 4 && bright < 95) tree++;             // dark green canopy
-          else if (b >= r && b >= g && b > 70 && (b - r) > 8) blue++;    // pool / water
-          else if ((mx - mn) < 28 && bright > 105) gray++;              // roof / pavement (bright, low-sat)
+          if (g > r + 4 && g > b + 4 && bright < 95) tree++;                                      // dark green canopy
+          else if (b >= r && b >= g && b > 70 && (b - r) > 8) blue++;                             // deep blue pool/water
+          else if (b > 120 && g > 110 && r < b - 12 && (mx - mn) > 12) blue++;                    // bright cyan/turquoise pool
+          else if ((mx - mn) < 28 && bright > 105) gray++;                                        // roof / pavement (bright, low-sat)
           tot++;
         }
         if (!tot) return 'open';
         const T = tree / tot, G = gray / tot, B = blue / tot;
-        return T > 0.45 ? 'tree' : B > 0.25 ? 'pool' : G > 0.4 ? 'building' : 'open';
+        return T > 0.45 ? 'tree' : B > 0.22 ? 'pool' : G > 0.4 ? 'building' : 'open';
       };
       let ci = 0;
       for (let gx = pminX; gx < pmaxX; gx += cell, ci++) {
         let ri = 0;
         for (let gy = pminY; gy < pmaxY; gy += cell, ri++) {
           const cxp = gx + cell / 2, cyp = gy + cell / 2;
-          const [lon, lat] = fromPx(cxp, cyp);
+          const [lon, lat] = cFromPx(cxp, cyp);
           if (!turf.booleanPointInPolygon(turf.point([lon, lat]), poly)) continue;
           const label = (cols[ci] || 'Z') + (ri + 1);
           cellCenters[label] = [lon, lat];
-          groundCells.push({ label, ll: [lon, lat], cxp, cyp, kind: classify(gx, gy) });
+          groundCells.push({ label, ll: [lon, lat], kind: classify(gx, gy) });
         }
       }
       out.ground = groundCells.reduce((a, c) => (a[c.kind] = (a[c.kind] || 0) + 1, a), {});
-    }
+      out.classZoom = zc;
+      emit('vision', { status: 'ok', attributes: { classZoom: zc, cells: groundCells.length, ...out.ground } });
+    } catch (e) { out.classifyError = String(e.message || e); emit('vision', { status: 'ok', attributes: { error: String(e.message || e) } }); }
 
     // --- Vision analysis (Azure OpenAI GPT-5) with a labeled GRID drawn over the parcel interior,
     //     so the model picks a CELL it can see is open ground (models are unreliable at raw pixels). ---
     let visionResult = null, aduSource = 'geometric';
     if (visionMod && process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_KEY) {
       try {
-        emit('vision', { status: 'start' });
         const vc = createCanvas(W, H); const vx = vc.getContext('2d');
         for (const [tx, ty, img] of tiles) vx.drawImage(img, (tx - tx0) * 256, (ty - ty0) * 256, 256, 256);
         vx.save(); vx.beginPath(); vx.rect(0, 0, W, H); poly.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? vx.lineTo(x, y) : vx.moveTo(x, y); }); vx.closePath(); vx.fillStyle = 'rgba(0,0,0,0.6)'; vx.fill('evenodd'); vx.restore();
@@ -276,8 +290,7 @@ async function fetchTile(z, x, y) {
         }
         out.gridCells = Object.keys(cellCenters).length;
         visionResult = await visionMod.analyzeAerial(vc.toBuffer('image/png'), { lotSqFt: out.lotAreaSqFt, acres: +(out.lotAreaSqFt / 43560).toFixed(2) });
-        emit('vision', { status: 'ok' });
-      } catch (e) { out.visionError = String(e.message || e); emit('vision', { status: 'error', error: e }); }
+      } catch (e) { out.visionError = String(e.message || e); }
     }
     // --- ADU placement (FREE, local pixel classification): anchor at the existing developed cluster
     //     (house + pool, detected by color), then choose the OPEN grid cell nearest that cluster where a
@@ -289,6 +302,7 @@ async function fetchTile(z, x, y) {
         const cent = turf.centroid(biggest);
         { const [gxp, gyp] = toPx(gc.lon, gc.lat); out.geocodeNorm = { x: +(gxp / W).toFixed(3), y: +(gyp / H).toFixed(3) }; }
         const developed = groundCells.filter(c => c.kind === 'building' || c.kind === 'pool');
+        const treeCells = groundCells.filter(c => c.kind === 'tree');
         let anchor = developed.length
           ? turf.centroid(turf.featureCollection(developed.map(c => turf.point(c.ll))))
           : turf.point([gc.lon, gc.lat]);
@@ -297,46 +311,32 @@ async function fetchTile(z, x, y) {
           anchor = turf.destination(np, 15, turf.bearing(np, cent), { units: 'feet' });
         }
         { const [ax, ay] = toPx(anchor.geometry.coordinates[0], anchor.geometry.coordinates[1]); out.placeAnchorNorm = { x: +(ax / W).toFixed(3), y: +(ay / H).toFixed(3) }; }
-        // Keep-out = any non-open (tree/pool/building) cell AND its 8-neighbours in grid space. The
-        // neighbour buffer covers imperfect detection (e.g. a pool cell mis-read as open still sits
-        // beside the detected house) and guarantees clearance from the existing structures.
-        const nonOpen = groundCells.filter(c => c.kind !== 'open');
-        const pos = {}; groundCells.forEach(c => { const m = c.label.match(/^([A-Z])(\d+)$/); if (m) pos[c.label] = [m[1].charCodeAt(0), +m[2]]; });
-        const blockedLabels = new Set();
-        for (const c of groundCells) {
-          if (c.kind !== 'open') { blockedLabels.add(c.label); continue; }
-          const p = pos[c.label];
-          if (p && nonOpen.some(n => { const q = pos[n.label]; return q && Math.abs(q[0] - p[0]) <= 1 && Math.abs(q[1] - p[1]) <= 1; })) blockedLabels.add(c.label);
-        }
-        const nonOpenLL = nonOpen.map(c => c.ll);
-        const nearNonOpen = (ll, ft) => nonOpenLL.some(o => turf.distance(turf.point(ll), turf.point(o), { units: 'feet' }) < ft);
-        // Pass 1: coarse — the open grid cell nearest the developed anchor whose ADU box fits.
-        let best = null, bestD = Infinity, bestCell = null;
-        for (const c of groundCells) {
-          if (c.kind !== 'open' || blockedLabels.has(c.label)) continue;
-          const ctr = turf.point(c.ll);
-          if (!turf.booleanPointInPolygon(ctr, biggest)) continue;
-          const box = mkBox(ctr);
-          if (!box.geometry.coordinates[0].every(p => turf.booleanPointInPolygon(turf.point(p), biggest))) continue;
-          const d = turf.distance(ctr, anchor, { units: 'feet' });
-          if (d < bestD) { bestD = d; best = box; bestCell = c.label; }
-        }
-        // Pass 2: fine fallback — dense grid over the envelope, avoiding within 26 ft of any tree/roof/
-        // water pixel-cell, nearest the developed anchor. Used only if no open grid cell fit a full box.
-        if (!best) {
-          const [x0, y0, x1, y1] = turf.bbox(biggest);
-          const N = 34;
+        // Clearances: stay well clear of the DEVELOPED cluster (house + any pool) — its buffer must be
+        // large enough to also clear an adjacent pool that colour-detection may have missed (a pool sits
+        // ~1 grid cell / ~32 ft from the house) — and clear of TREE canopy. Then pick the spot nearest
+        // the developed cluster that satisfies both, so the ADU lands on open ground beside the house.
+        const near = (ll, cells, ft) => cells.some(c => turf.distance(turf.point(ll), turf.point(c.ll), { units: 'feet' }) < ft);
+        const devLL = developed.length ? developed : [{ ll: [gc.lon, gc.lat] }];
+        const bb = turf.bbox(biggest);
+        const search = (devFt, treeFt, N) => {
+          let bBox = null, bD = Infinity;
           for (let ix = 0; ix <= N; ix++) for (let iy = 0; iy <= N; iy++) {
-            const ctr = turf.point([x0 + (x1 - x0) * ix / N, y0 + (y1 - y0) * iy / N]);
+            const ll = [bb[0] + (bb[2] - bb[0]) * ix / N, bb[1] + (bb[3] - bb[1]) * iy / N];
+            const ctr = turf.point(ll);
             if (!turf.booleanPointInPolygon(ctr, biggest)) continue;
-            if (nearNonOpen(ctr.geometry.coordinates, 26)) continue;
+            if (near(ll, devLL, devFt)) continue;                 // clear the house + (adjacent) pool
+            if (treeCells.length && near(ll, treeCells, treeFt)) continue; // clear tree canopy
             const box = mkBox(ctr);
             if (!box.geometry.coordinates[0].every(p => turf.booleanPointInPolygon(turf.point(p), biggest))) continue;
             const d = turf.distance(ctr, anchor, { units: 'feet' });
-            if (d < bestD) { bestD = d; best = box; }
+            if (d < bD) { bD = d; bBox = box; }
           }
-        }
-        if (best) { aduBox = best; aduSource = 'local-vision'; out.aduFitsSqFt = Math.round(side * side); out.aduCell = bestCell; }
+          return bBox;
+        };
+        // Try progressively looser clearances so we always find a spot, but keep the house/pool buffer
+        // as generous as fits: 42 ft (clears house + adjacent pool) → 34 → 28.
+        let best = search(42, 26, 44) || search(34, 22, 44) || search(28, 16, 48);
+        if (best) { aduBox = best; aduSource = 'local-vision'; out.aduFitsSqFt = Math.round(side * side); }
       } catch (e) { out.visionPlaceError = String(e.message || e); }
     }
     out.aduSource = aduSource;
