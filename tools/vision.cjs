@@ -9,24 +9,24 @@ const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-5.4';
 const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || '2025-04-01-preview';
 
 const SYSTEM = `You are a site-planning assistant analyzing an aerial photo of a residential property to decide where a new ~30 ft x 30 ft (900 sq ft) Accessory Dwelling Unit (ADU) can PRACTICALLY be built.
-The subject parcel is outlined in YELLOW. Only consider space INSIDE the yellow outline.
-Identify what already occupies the lot and would constrain an ADU: the existing house, swimming pool, driveway/paved areas, sheds/outbuildings, dense tree/forest cover, water or wetland, and open cleared lawn.
-Then choose the single best location for the ADU: an open, relatively clear area inside the parcel that AVOIDS the pool, the house (keep a few feet away), the driveway, and minimizes tree removal, and is not in the front yard between the house and the street.
-Respond with STRICT JSON only, no prose, matching this schema:
+The subject parcel is outlined in YELLOW and a labeled GRID of white cells (like A1, B2, C3) is drawn ONLY over the buildable interior of that parcel. Everything OUTSIDE the parcel is darkened — ignore it entirely.
+Look carefully at what is UNDER each grid cell in the photo. Classify the ground in each cell as one of: open/cleared lawn or dirt, tree/forest canopy, building/house roof, swimming pool, driveway/pavement, or water.
+Choose the SINGLE best grid cell for the ADU: it must be OPEN CLEARED GROUND (NOT under tree canopy), avoid the house/pool/driveway, not be in the front yard between the house and the street, and require the least tree removal. If NO cell is genuinely open, pick the least-treed cell and say so in concerns.
+Respond with STRICT JSON only:
 {
-  "features": [ { "label": "house|pool|driveway|shed|forest|open_lawn|water|other", "description": "short", "x": 0.0, "y": 0.0 } ],
-  "adu": { "x": 0.0, "y": 0.0, "rationale": "why here", "obstaclesAvoided": ["pool", "..."] },
-  "concerns": ["short caveats a human should verify"],
-  "summary": "2-3 sentence plain-English description of the lot and the recommendation"
+  "adu": { "cell": "C2", "rationale": "why this cell", "isOpenGround": true },
+  "cells": { "A1": "forest", "B2": "open_lawn", "C2": "open_lawn", "...": "pool|house|driveway|forest|open_lawn|water" },
+  "features": [ { "label": "house|pool|driveway|forest|open_lawn|water", "cell": "B2" } ],
+  "concerns": ["short caveats a human must verify"],
+  "summary": "2-3 sentences: describe the lot and why the chosen cell is the best practical ADU spot"
 }
-Coordinates x,y are fractions of the image: x=0 left edge, x=1 right edge, y=0 top edge, y=1 bottom edge. Put the ADU center at adu.x/adu.y, inside the yellow parcel and inside any open area you found.`;
+Pick adu.cell from the labels actually drawn on the image. Base it on what you SEE under that cell, not assumptions.`;
 
 async function analyzeAerial(pngBuffer, ctx = {}) {
   if (!ENDPOINT || !KEY) return null;
   const dataUrl = 'data:image/png;base64,' + Buffer.from(pngBuffer).toString('base64');
-  const userText = `Analyze this aerial. Parcel is ~${ctx.lotSqFt ? Math.round(ctx.lotSqFt).toLocaleString() : '?'} sq ft (${ctx.acres ?? '?'} ac).`
-    + (ctx.frontNote ? ` ${ctx.frontNote}` : '')
-    + ` Find obstacles and recommend the ADU location as normalized image coordinates.`;
+  const userText = `Analyze this aerial with the labeled grid. Parcel is ~${ctx.lotSqFt ? Math.round(ctx.lotSqFt).toLocaleString() : '?'} sq ft (${ctx.acres ?? '?'} ac).`
+    + ` Look at what is under each grid cell and pick the best OPEN, cleared cell for the ADU (avoid trees, pool, house, driveway, front yard).`;
   const body = {
     messages: [
       { role: 'system', content: SYSTEM },

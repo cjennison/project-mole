@@ -222,9 +222,29 @@ building carve-out + a sample ADU auto-placed in the open yard. Deps: `@turf/tur
   Investigated fallbacks and rejected: **OSM Overpass** (public endpoints 504/time out — not
   production-reliable), **Microsoft footprints** (no stable public queryable endpoint),
   **NH GRANIT** (no building layer), **Manchester MapGeo** (commercial portal, no clean API).
-- **ADU placement:** grid-search the largest buildable piece for a 30×30 ft (900 sf) square
-  that fits and is farthest from the front edge (→ rear/side yard).
-- ✅ Tested `1335 River Rd`: per-edge buildable ≈ 11,927 sf; 900 sf ADU placed in the side yard.
+- **ADU placement (v3 — free local aerial classification, NO paid vision needed):** the old
+  "farthest from front edge" heuristic and the AOAI point-picking both landed the ADU in the
+  woods. The reliable, **zero-cost** method is to classify the aerial *pixels* per ~32 ft grid
+  cell and place the box on **open ground beside the existing developed cluster**:
+  1. Draw the imagery tiles, then (BEFORE any mask/overlay corrupts the pixels) sample each
+     grid cell with `ctx.getImageData` and classify by color:
+     - **tree canopy** = green-dominant `g>r+4 && g>b+4` AND brightness `<95` (very reliable);
+     - **pool/water** = blue-dominant `b>=r,g && b>70 && b-r>8`;
+     - **building/roof/pavement** = low saturation `max-min<28` AND bright `>105`;
+     - **open** = everything else. Cell kind = `tree>0.45 ? tree : blue>0.25 ? pool : gray>0.4 ? building : open`.
+  2. **Anchor** = centroid of the detected *developed* cells (building+pool). ADUs go next to the
+     house (utilities/driveway), never across a wooded lot.
+  3. **Keep-out** = every non-open cell **plus its 8 grid neighbours** (the neighbour buffer
+     covers imperfect detection — e.g. a pool cell mis-read as open still sits beside the house).
+  4. **Place** the ADU box on the OPEN cell nearest the anchor whose full 30×30 ft box fits inside
+     the setback envelope; fine-grid fallback avoids within 26 ft of any tree/roof/water cell.
+  5. The map draws the detected tree/pool cells as translucent overlays so it is **self-consistent**
+     (viewer sees the forest & pool the agent avoided, box on open ground). AOAI vision is now
+     **optional** and only enriches the narrative — placement is fully deterministic & free.
+  - ⚠️ Sampling MUST happen on the raw tile pixels; a dark parcel mask drawn first breaks the
+    color thresholds. Slim Linux images need `fonts-dejavu-core` or the map text won't render.
+  - ✅ Re-tested `1325`, `1335`, `1341 River Rd`: box now lands on open ground beside the house
+    (right of the pool at 1325), forest correctly detected & marked to the east — no more woods.
 
 > **Geocode-offset gotcha (fixed in collect.mjs + sitemap.cjs):** the US Census geocode point
 > can be **>150 m off** the actual parcel (observed 1335 River Rd: ~170 m). Resolve the parcel

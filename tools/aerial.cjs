@@ -32,20 +32,74 @@ const tile = async (z, x, y) => loadImage(Buffer.from(await (await fetch(`${TILE
   const cv = createCanvas(W, H), ctx = cv.getContext('2d');
   for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) ctx.drawImage(await tile(zoom, tx, ty), (tx - tx0) * 256, (ty - ty0) * 256);
   const toPx = (lon, lat) => { const [x, y] = gp(lon, lat, zoom); return [x - oX, y - oY]; };
+  const fromPx = (px, py) => { const n = 256 * Math.pow(2, zoom); const gx = px + oX, gy = py + oY; return [gx / n * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * gy / n))) * 180 / Math.PI]; };
+  const mpp = 156543.03392 * Math.cos(((minLat + maxLat) / 2) * D2R) / Math.pow(2, zoom);
   const drawPoly = () => { ctx.beginPath(); poly.geometry.coordinates[0].forEach((p, i) => { const [x, y] = toPx(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); };
   // Mask everything OUTSIDE the parcel so analysis only considers land that is actually this lot.
   const mask = process.argv[5] !== 'nomask';
-  if (mask) {
+  const grid = process.argv[6] === 'grid';
+  if (mask && !grid) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, W, H);
     poly.geometry.coordinates[0].forEach((p, i) => { const [x, y] = toPx(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.closePath();
-    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fill('evenodd');
     ctx.restore();
   }
-  ctx.strokeStyle = '#ffe100'; ctx.lineWidth = 4; drawPoly(); ctx.stroke();
+  if (!grid) { ctx.strokeStyle = '#ffe100'; ctx.lineWidth = 4; drawPoly(); ctx.stroke(); }
+  if (grid) {
+    const turf2 = turf;
+    const cell = Math.max(38, (32 * 0.3048) / mpp);
+    const ringPx = poly.geometry.coordinates[0].map(c => toPx(c[0], c[1]));
+    const pminX = Math.min(...ringPx.map(p => p[0])), pmaxX = Math.max(...ringPx.map(p => p[0]));
+    const pminY = Math.min(...ringPx.map(p => p[1])), pmaxY = Math.max(...ringPx.map(p => p[1]));
+    const cols = 'ABCDEFGHIJKLMNOPQRSTUVWX';
+    // classify each cell as tree/open by sampling raw aerial pixels (before mask)
+    const classify = (gx, gy) => {
+      const w = Math.min(cell, W - gx), h = Math.min(cell, H - gy);
+      if (w <= 1 || h <= 1) return { tree: 0, gray: 0, blue: 0 };
+      const d = ctx.getImageData(Math.max(0, gx), Math.max(0, gy), Math.floor(w), Math.floor(h)).data;
+      let tree = 0, gray = 0, blue = 0, tot = 0;
+      for (let i = 0; i < d.length; i += 16) {
+        const r = d[i], g = d[i + 1], b = d[i + 2]; const bright = (r + g + b) / 3; const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        if (g > r + 4 && g > b + 4 && bright < 95) tree++;                        // dark green canopy
+        else if (b >= r && b >= g && b > 70 && (b - r) > 8) blue++;                // pool/water
+        else if ((mx - mn) < 28 && bright > 105) gray++;                          // roof/pavement (low sat, bright)
+        tot++;
+      }
+      return tot ? { tree: tree / tot, gray: gray / tot, blue: blue / tot } : { tree: 0, gray: 0, blue: 0 };
+    };
+    const cellsInfo = [];
+    let ci = 0;
+    for (let gx = pminX; gx < pmaxX; gx += cell, ci++) {
+      let ri = 0;
+      for (let gy = pminY; gy < pmaxY; gy += cell, ri++) {
+        const cxp = gx + cell / 2, cyp = gy + cell / 2;
+        const [lon, lat] = fromPx(cxp, cyp);
+        if (!turf2.booleanPointInPolygon(turf2.point([lon, lat]), poly)) continue;
+        cellsInfo.push({ label: (cols[ci] || 'Z') + (ri + 1), gx, gy, cxp, cyp, ...classify(gx, gy) });
+      }
+    }
+    // mask outside parcel
+    if (mask) { ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); poly.geometry.coordinates[0].forEach((p, i) => { const [x, y] = toPx(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill('evenodd'); ctx.restore(); }
+    ctx.strokeStyle = '#ffe100'; ctx.lineWidth = 4; drawPoly(); ctx.stroke();
+    // classify each cell: tree(red) / pool(blue) / building(gray) / open(green)
+    const kind = (c) => c.tree > 0.45 ? 'tree' : c.blue > 0.25 ? 'pool' : c.gray > 0.4 ? 'building' : 'open';
+    const tint = { tree: 'rgba(255,60,60,0.35)', pool: 'rgba(0,180,255,0.45)', building: 'rgba(180,180,180,0.5)', open: 'rgba(60,255,60,0.35)' };
+    ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
+    for (const c of cellsInfo) {
+      const k = kind(c);
+      ctx.fillStyle = tint[k]; ctx.fillRect(c.gx, c.gy, cell, cell);
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(c.gx, c.gy, cell, cell);
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 3; ctx.strokeText(c.label, c.cxp, c.cyp + 4);
+      ctx.fillStyle = '#fff'; ctx.fillText(c.label, c.cxp, c.cyp + 4);
+    }
+    fs.writeFileSync(out, cv.toBuffer('image/png'));
+    console.log(JSON.stringify({ out, cells: cellsInfo.map(c => ({ label: c.label, kind: kind(c) })) }));
+    return;
+  }
   fs.writeFileSync(out, cv.toBuffer('image/png'));
-  console.log(JSON.stringify({ out, zoom, size: `${W}x${H}`, pid: pf.attributes.PID, masked: mask }));
+  console.log(JSON.stringify({ out, zoom, size: `${W}x${H}`, pid: pf.attributes.PID, masked: mask, grid }));
 })();
