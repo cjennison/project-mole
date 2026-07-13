@@ -130,11 +130,34 @@ https://services1.arcgis.com/aguSsLS841Hp3EC4/ArcGIS/rest/services/NH_Atlas_Zoni
 
 ---
 
-## Step 7 — Septic / wells → NHDES OneStop
-- Subsurface (septic approvals) + Well Completion Reports, searchable by address/map-lot.
-- `https://www4.des.state.nh.us/OneStop/...` — ASP.NET forms → **Playwright**.
-- If public sewer/water confirmed (Step 5 / listing), expect no records; if records exist →
-  private system → capacity + 75-ft setback analysis.
+## Step 7 — Septic / wells / official environmental → NHDES GIS + OneStop
+**NHDES ArcGIS server (public):** `https://gis.des.nh.gov/server/rest/services`
+- ✅ **Official shoreland check:** `Projects_LRM/Shoreland_Protection_Act/MapServer`
+  - L0 Urban Exemptions, **L1 "4th Order and Above Streams and Rivers"**, L2 Lakes/Ponds
+    jurisdiction. Point-in-layer test = authoritative shoreland determination.
+  - ✅ Verified `1335 River Rd`: point in **none** of these → shoreland officially N/A
+    (independent confirmation of the NH GRANIT result).
+- Wetlands/terrain: `Projects_LRM/National_Wetlands_Inventory_Plus_NWIPlus_New_Hampshire`,
+  `New_Hampshire_Prime_Wetlands`, `NHDES_Wetland_Permits_by_Year`, `NHDES_Alteration_of_Terrain_Projects`.
+- **Environmental due-diligence** (`Core_GIS_Datasets/DES_Data_Public/MapServer`, 14 layers):
+  Remediation Sites, Underground/Aboveground Storage Tanks, Hazardous Waste Generators,
+  Auto Salvage Yards, Groundwater Classification GA1/GA2, NPDES Outfalls, etc. Point/buffer
+  query these to flag nearby contamination — a value-add screen, not core ADU feasibility.
+- ⚠️ **Septic (subsurface) approvals & Well Completion Reports are NOT in the public GIS.**
+  They live in **NHDES OneStop** (`https://www4.des.state.nh.us/OneStop/...`), an ASP.NET app
+  → **Playwright/headless browser** required. Search by address or map-lot. If public
+  sewer/water is confirmed (listing/assessor), expect no records.
+
+## Step 5b — Assessor card (owner, assessed value, sewer flag) → VGSI [Playwright]
+- `https://gis.vgsi.com/manchesternh/` — ASP.NET postback search → **headless browser**.
+  Confirms owner, land/bldg assessed value, and often a utilities/sewer field.
+
+## Impact fees & permit fees (Manchester) — verified
+- Building permit, new 1&2-family: **est. construction cost × 0.006**.
+- Planning Board application: **$250 base + $100/dwelling unit**.
+- ADUs ARE subject to impact fees (Article 13 of the zoning ordinance); internal conversions
+  may be treated more leniently. Exact ADU impact-fee dollar amount → confirm with PCD.
+- Source: `manchesternh.gov/pcd/forms/PermitFeeSchedule.pdf`, PCD "Fees" page.
 
 ---
 

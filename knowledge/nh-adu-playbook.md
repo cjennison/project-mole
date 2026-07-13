@@ -152,7 +152,9 @@ pre-filled action list instead of a blank research project.
 | **Floodplain** | **Zone X, SFHA=False — NOT in a flood zone** (at rooftop point) | FEMA NFHL API | ✅ confirmed (check rear yard too) |
 | **Shoreland** | **NOT APPLICABLE** — 0 fourth-order+ water within 250 ft; nearest Merrimack River ≈ 0.5 mi (2,600–3,000 ft) east. "River Rd" is a misnomer → **no NHDES shoreland permit needed** | NH GRANIT IWR/WaterResources | ✅ confirmed (big assumption corrected) |
 | Building code | 2021 IRC/IBC | NH Fire Safety | high |
-| Impact fees | Manchester charges impact fees on new dwelling units — amount TBD | Manchester PCD | needs lookup |
+| Impact fees | Bldg permit = cost×0.006; Planning Bd = $250+$100/unit; ADU subject to Art.13 impact fee (exact $ via PCD) | Manchester PCD fee schedule | ✅ formulae confirmed |
+| Wetlands | **None within 100 ft** | NH GRANIT / NHDES | ✅ confirmed |
+| Enviro sites | (optional screen) query NHDES DES_Data_Public for nearby USTs/remediation | NHDES GIS | not run |
 
 ### Buildable-envelope check (dimensional feasibility) — ✅ FEASIBLE
 - Lot 25,778 sqft; **40% max coverage = 10,311 sqft** allowed (buildings + impervious).
@@ -184,6 +186,34 @@ pre-filled action list instead of a blank research project.
 ---
 
 ## 6. Open questions for the human (project owner)
-- Attached or detached ADU preferred? (changes setback/shoreland math)
+- Attached or detached ADU preferred? (changes setback/placement math)
 - Is owner-occupancy acceptable? (NH requires owner in one unit)
-- Budget ceiling? (drives septic-upgrade vs public-tie-in decisions)
+- Budget ceiling? (drives finish level & utility-tie-in decisions)
+
+---
+
+## 7. FINAL VERDICT — 1335 River Rd, Manchester (test run)
+**✅ ADU IS FEASIBLE BY-RIGHT.** A detached (or attached) **≤900 sqft, ≤2-bedroom** ADU is
+allowed with **only a building permit** (no variance/special exception) under RSA 674:72.
+
+**Why it clears easily:**
+- Zoning R-1A, single-family → ADU by-right; lot 0.59 ac ≫ 0.27 ac min; envelope fits 900 sqft
+  inside 25/20/30 setbacks at ~24% coverage (< 40% cap).
+- **No environmental blockers**: Flood Zone X (not SFHA); shoreland N/A (Merrimack ~0.5 mi;
+  officially confirmed by NHDES layer); no wetlands within 100 ft.
+- Likely public sewer (per listing) → no septic redesign.
+
+**What a human still MUST do (unavoidable):**
+1. 🧑 Confirm public **sewer AND water** at the tap (Manchester EPD / Water Works) — the one
+   open feasibility item; 🤖 pre-checked via listing but not officially confirmed.
+2. 🧑/📨 Building permit + plans (2021 IRC/IBC); pay impact fee (Art. 13).
+3. 📨 Record **owner-occupancy deed restriction**.
+4. 📨→🧑 **NH811 locate** before excavation; utilities physically mark out.
+5. 🧑 On-site inspections (footing, framing, electrical, plumbing, insulation, final).
+
+**Agent-only remaining lookups (need Playwright container, not blocking feasibility):**
+- VGSI assessor card → owner name, official assessed value, sewer field.
+- NHDES OneStop → confirm no septic/well records on file.
+
+**Bottom line:** the agent reduced a multi-day research scramble to a ~5-item human checklist
+and produced a defensible "feasible by-right" determination for this address.
