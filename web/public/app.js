@@ -90,7 +90,40 @@ function renderResult(job) {
   card.appendChild(act);
 
   res.appendChild(card);
+
+  // Telemetry pulled from Application Insights (proves the AI integration end-to-end).
+  const ai = el('section', 'card');
+  ai.appendChild(el('h3', 'sec', 'Telemetry — pulled live from Application Insights'));
+  ai.appendChild(el('p', 'hint', 'These events were emitted by the MOLE agent and queried back from Azure Application Insights. Ingestion can lag ~1–2 min, so click refresh if the list looks short.'));
+  const aiBox = el('div', 'ai-events', 'Loading from Application Insights…');
+  ai.appendChild(aiBox);
+  const refresh = el('button', 'chip', '↻ Refresh from App Insights');
+  refresh.style.marginTop = '10px';
+  refresh.addEventListener('click', () => loadInsights(job.id, aiBox));
+  ai.appendChild(refresh);
+  res.appendChild(ai);
+  loadInsights(job.id, aiBox);
+
   res.classList.remove('hidden');
+}
+
+async function loadInsights(id, box) {
+  box.textContent = 'Loading from Application Insights…';
+  try {
+    const d = await fetch('/api/insights/' + id).then(r => r.json());
+    if (!d.enabled) { box.textContent = 'Application Insights query not configured.'; return; }
+    if (!d.rows || !d.rows.length) { box.textContent = 'No events indexed yet (ingestion lag) — click refresh in a moment.'; return; }
+    box.innerHTML = '';
+    const tbl = el('table', 'gates');
+    for (const r of d.rows) {
+      const tr = el('tr');
+      tr.appendChild(el('td', 'g', r.name || ''));
+      tr.appendChild(el('td', null, `<span class="st ${r.status === 'ok' ? 'pass' : r.status === 'error' ? 'warn' : 'unknown'}">${r.status || ''}</span>`));
+      tr.appendChild(el('td', null, (r.durationMs ? Math.round(r.durationMs) + ' ms' : '') + (r.timestamp ? ` · ${new Date(r.timestamp).toLocaleTimeString()}` : '')));
+      tbl.appendChild(tr);
+    }
+    box.appendChild(tbl);
+  } catch (e) { box.textContent = 'Could not query Application Insights: ' + (e.message || e); }
 }
 
 async function tick(id) {
