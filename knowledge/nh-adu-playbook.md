@@ -143,7 +143,10 @@ pre-filled action list instead of a blank research project.
 | **Parcel ID** | **PID 222-83** (NH_GIS_ID 064134-222-83); Manchester (TownID 4134), Hillsborough Co (6) | NH GRANIT ParcelMosaic | ✅ confirmed |
 | Lot | **25,778 sq ft = 0.592 ac** (Shape_Area); single-family ranch, built 1979, 3bd/2.5ba, 2,028 sqft | NH GRANIT (area) + Zillow (bldg) | ✅ lot confirmed |
 | Land use | **SLU/SLUC = 11** (single-family residential) → single-family IS the use → **ADU allowed by right** | NH GRANIT | ✅ (verify SLU table) |
-| Value | Sold $605k (May 2024); Zestimate ~$674k | Zillow | med (get assessor card) |
+| Value | Sold $605k (May 2024); **assessed $397,400 (2025, VGSI)**; Zestimate ~$674k | VGSI assessor + Zillow | ✅ confirmed |
+| Owner | **JENNISON, JESSICA L** (Bk/Pg 9775/1322, 05/16/2024) | VGSI assessor | ✅ confirmed |
+| Use code | **1010 = SINGLE FAM** (VGSI) → matches SLU 11 | VGSI assessor | ✅ confirmed |
+| Lot (official) | **25,740 sqft** (VGSI) ≈ 25,778 (GRANIT) | VGSI assessor | ✅ confirmed |
 | Sewer | **Public sewer** (listing) | Redfin | med (confirm w/ Manchester EPD) |
 | Water | Assume public (North End) — **CONFIRM** | — | low |
 | Zoning | **R-1A** (Residential One-Family, Medium Density; public-sewer variant). SF allowed → ADU by right under RSA 674:72 | NH Zoning Atlas | ✅ confirmed |
@@ -154,18 +157,22 @@ pre-filled action list instead of a blank research project.
 | Building code | 2021 IRC/IBC | NH Fire Safety | high |
 | Impact fees | Bldg permit = cost×0.006; Planning Bd = $250+$100/unit; ADU subject to Art.13 impact fee (exact $ via PCD) | Manchester PCD fee schedule | ✅ formulae confirmed |
 | Wetlands | **None within 100 ft** | NH GRANIT / NHDES | ✅ confirmed |
+| Parcel dims | Bounding box **272 ft × 137 ft** (7-sided, 719 ft perimeter) → frontage > 100 ft min ✓ | NH GRANIT geometry | ✅ confirmed |
+| Enviro sites | **CLEAN** — 0 USTs/remediation/salvage/hazwaste/asbestos/solid-waste within 1000 ft | NHDES DES_Data_Public | ✅ confirmed |
+| Groundwater | Classification **GA2** (standard; GA1=0) | NHDES | ✅ confirmed |
 | Enviro sites | (optional screen) query NHDES DES_Data_Public for nearby USTs/remediation | NHDES GIS | not run |
 
 ### Buildable-envelope check (dimensional feasibility) — ✅ FEASIBLE
-- Lot 25,778 sqft; **40% max coverage = 10,311 sqft** allowed (buildings + impervious).
-- Est. existing impervious (2,028 sqft ranch footprint + ~600 sqft oversized 2-car garage +
-  driveway/deck) ≈ **~5,000 sqft (~19%)** → ~5,300 sqft headroom.
-- A **detached 900 sqft ADU** + small access path (~1,200 sqft) → ~24% coverage, well under 40%. ✓
-- FAR 0.3 → max floor area 7,733 sqft; nowhere near it. ✓
-- Setbacks F25/S20/R30 on a ~0.59-ac lot leave a large rear/side envelope. Manchester ADU
-  overlay rules still apply: detached ≥5 ft from primary, **not in front yard**, ≤ primary height.
-- **Conclusion: a 900 sqft / 2-br detached ADU fits by-right, no variance needed** (pending
-  exact site plan + confirmed public sewer/water).
+- Lot **25,740 sqft** (VGSI); **40% max coverage = 10,296 sqft** (buildings + impervious).
+- **Actual existing building footprint (VGSI sub-areas): 2,638 sqft** = 1,416 (1st flr) + 780
+  (garage) + 332 (enclosed porch) + 110 (open porch) → **~10.2% building coverage**.
+- + driveway/deck (~1,000–1,500 sqft) → existing impervious ~**15%**. Adding a detached
+  **900 sqft ADU** + pad/path (~1,300 sqft) → ~**20%**, comfortably under the 40% cap. ✓
+- FAR 0.3 → max floor area 7,722 sqft; existing ~2,528 sqft finished. ✓
+- Parcel 272×137 ft envelope with F25/S20/R30 setbacks leaves a large rear/side yard.
+  Manchester ADU rules: detached ≥5 ft from primary, **not in front yard**, ≤ primary height.
+- **Conclusion: a 900 sqft / 2-br detached ADU fits by-right, no variance** (pending confirmed
+  public sewer/water).
 
 ### Biggest gating items for THIS property
 1. ~~Shoreland permit~~ **CLEARED** — Merrimack ~0.5 mi away; RSA 483-B does not apply.

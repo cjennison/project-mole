@@ -148,9 +148,27 @@ https://services1.arcgis.com/aguSsLS841Hp3EC4/ArcGIS/rest/services/NH_Atlas_Zoni
   → **Playwright/headless browser** required. Search by address or map-lot. If public
   sewer/water is confirmed (listing/assessor), expect no records.
 
-## Step 5b — Assessor card (owner, assessed value, sewer flag) → VGSI [Playwright]
-- `https://gis.vgsi.com/manchesternh/` — ASP.NET postback search → **headless browser**.
-  Confirms owner, land/bldg assessed value, and often a utilities/sewer field.
+## Step 5b — Assessor card (owner, value, use, lot, sales) → VGSI via Playwright ✅ WORKS
+- Base: `https://gis.vgsi.com/manchesternh/` (path assets `/ManchesterNH/`). ASP.NET postback.
+- **Working recipe (tested in the container):**
+  1. `goto Search.aspx` (`waitUntil: 'domcontentloaded'` — NOT networkidle; keep-alive pings
+     abort networkidle).
+  2. `selectOption('#MainContent_ddlSearchSource','3')` → MBLU mode (0=Address,1=Owner,3=Mblu).
+  3. Fill `#MainContent_txtM` (Map), `#MainContent_txtB` (Block), `#MainContent_txtL` (Lot).
+     For Manchester, PID `222-83` = **Map 222, Lot 83** (Block empty).
+  4. Submit is hidden — trigger via `document.getElementById('MainContent_btnSubmit').click()`.
+  5. Lands on `Parcel.aspx?pid=<internalId>`; scrape `span[id*="lbl"]`.
+- Key span ids: `lblGenOwner`, `lblGenAssessment` (Total Market Value), `lblUseCode` +
+  `lblUseCodeDescription`, `lblLndSize` (sqft), `lblMblu`, `lblPrice`/`lblSaleDate`/`lblBp`
+  (book&page), building attrs under `ctl02_lbl*`.
+- ✅ `1335 River Rd` → pid **6246**, Owner **JENNISON, JESSICA L**, MBLU 0222/0083,
+  **assessed $397,400 (2025)**, Use **1010 SINGLE FAM**, land **25,740 sqft**, sold $605k
+  05/16/2024 Bk/Pg 9775/1322. Building: Ranch 1979, 1,416 sqft 1st flr + 780 garage + 332
+  enclosed + 110 open porch. (No utilities/sewer field in the summary; try the Field Card PDF.)
+- Run: `docker run --rm --entrypoint node -e NODE_PATH=/usr/local/lib/node_modules
+  -v <scripts>:/work --cap-add SYS_ADMIN --security-opt seccomp:unconfined
+  project-mole-copilot:latest /work/vgsi.cjs`. Script committed at `scripts/vgsi.cjs`.
+- **NH assessing Use Code 1010 = single-family** (confirms SLU 11 / single-family use).
 
 ## Impact fees & permit fees (Manchester) — verified
 - Building permit, new 1&2-family: **est. construction cost × 0.006**.
