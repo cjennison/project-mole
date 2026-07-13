@@ -1,0 +1,40 @@
+services:
+  copilot:
+    build: .
+    image: project-mole-copilot:latest
+    container_name: project-mole-copilot
+
+    # ── Volumes ──────────────────────────────────────────────────────────────
+    # Mount the host's Copilot auth & config state so the container inherits
+    # your authentication without re-running the OAuth device flow.
+    # Mount the repository so Copilot CLI has the full codebase in scope.
+    volumes:
+      - type: bind
+        source: ${COPILOT_HOME_HOST:-~/.copilot}
+        target: /root/.copilot
+      - type: bind
+        source: .
+        target: /workspace
+
+    # ── Environment ──────────────────────────────────────────────────────────
+    environment:
+      - COPILOT_HOME=/root/.copilot
+      # Your GitHub OAuth token — get it with: gh auth token
+      # This is used as COPILOT_GITHUB_TOKEN inside the container.
+      - COPILOT_TOKEN=${COPILOT_TOKEN:-}
+      # GitHub username matching the token
+      - COPILOT_USER=${COPILOT_USER:-cjennison}
+      # Optional: set a prompt to run non-interactively and exit
+      - COPILOT_PROMPT=${COPILOT_PROMPT:-}
+
+    # ── Interactive TTY ───────────────────────────────────────────────────────
+    # Needed for the interactive Copilot CLI TUI.  Remove if running headless.
+    stdin_open: true
+    tty: true
+
+    # ── Security ─────────────────────────────────────────────────────────────
+    # Playwright/Chromium inside Docker requires these capabilities.
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined

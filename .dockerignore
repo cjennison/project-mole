@@ -1,0 +1,17 @@
+# Git
+.git/
+.gitignore
+
+# Node
+node_modules/
+
+# Copilot session state (don't bake into the image; always mounted at runtime)
+.copilot/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
