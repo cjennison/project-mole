@@ -16,7 +16,6 @@ try {
     if (fsx.existsSync(p)) GlobalFonts.registerFromPath(p, 'sans-serif');
   }
 } catch {}
-let visionMod; try { visionMod = require('./vision.cjs'); } catch {}
 let emit = () => {}, flush = async () => {};
 
 const ADDRESS = process.argv[2];
@@ -258,40 +257,8 @@ async function fetchTile(z, x, y) {
       emit('vision', { status: 'ok', attributes: { classZoom: zc, cells: groundCells.length, ...out.ground } });
     } catch (e) { out.classifyError = String(e.message || e); emit('vision', { status: 'ok', attributes: { error: String(e.message || e) } }); }
 
-    // --- Vision analysis (Azure OpenAI GPT-5) with a labeled GRID drawn over the parcel interior,
-    //     so the model picks a CELL it can see is open ground (models are unreliable at raw pixels). ---
-    let visionResult = null, aduSource = 'geometric';
-    if (visionMod && process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_KEY) {
-      try {
-        const vc = createCanvas(W, H); const vx = vc.getContext('2d');
-        for (const [tx, ty, img] of tiles) vx.drawImage(img, (tx - tx0) * 256, (ty - ty0) * 256, 256, 256);
-        vx.save(); vx.beginPath(); vx.rect(0, 0, W, H); poly.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? vx.lineTo(x, y) : vx.moveTo(x, y); }); vx.closePath(); vx.fillStyle = 'rgba(0,0,0,0.6)'; vx.fill('evenodd'); vx.restore();
-        vx.strokeStyle = '#ffe100'; vx.lineWidth = 4; vx.beginPath(); poly.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? vx.lineTo(x, y) : vx.moveTo(x, y); }); vx.closePath(); vx.stroke();
-        // labeled grid (~32 ft cells) over the parcel interior
-        const cell = Math.max(38, (32 * 0.3048) / mppAt(center[1], z));
-        const ringPx = poly.geometry.coordinates[0].map(c => toPx(c[0], c[1]));
-        const pminX = Math.min(...ringPx.map(p => p[0])), pmaxX = Math.max(...ringPx.map(p => p[0]));
-        const pminY = Math.min(...ringPx.map(p => p[1])), pmaxY = Math.max(...ringPx.map(p => p[1]));
-        const cols = 'ABCDEFGHIJKLMNOPQRSTUVWX';
-        vx.font = 'bold 13px sans-serif'; vx.textAlign = 'center';
-        let ci = 0;
-        for (let gx = pminX; gx < pmaxX; gx += cell, ci++) {
-          let ri = 0;
-          for (let gy = pminY; gy < pmaxY; gy += cell, ri++) {
-            const cxp = gx + cell / 2, cyp = gy + cell / 2;
-            const [lon, lat] = fromPx(cxp, cyp);
-            if (!turf.booleanPointInPolygon(turf.point([lon, lat]), poly)) continue;
-            const label = (cols[ci] || 'Z') + (ri + 1);
-            cellCenters[label] = [lon, lat];
-            vx.strokeStyle = 'rgba(255,255,255,0.55)'; vx.lineWidth = 1; vx.strokeRect(gx, gy, cell, cell);
-            vx.strokeStyle = 'rgba(0,0,0,0.85)'; vx.lineWidth = 3; vx.strokeText(label, cxp, cyp + 4);
-            vx.fillStyle = '#ffffff'; vx.fillText(label, cxp, cyp + 4);
-          }
-        }
-        out.gridCells = Object.keys(cellCenters).length;
-        visionResult = await visionMod.analyzeAerial(vc.toBuffer('image/png'), { lotSqFt: out.lotAreaSqFt, acres: +(out.lotAreaSqFt / 43560).toFixed(2) });
-      } catch (e) { out.visionError = String(e.message || e); }
-    }
+    // ADU placement is fully deterministic (local pixel classification below); no external model.
+    let aduSource = 'geometric';
     // --- ADU placement (FREE, local pixel classification): anchor at the existing developed cluster
     //     (house + pool, detected by color), then choose the OPEN grid cell nearest that cluster where a
     //     full ADU box fits inside the setback envelope — and is not on/adjacent to any tree/roof/water
@@ -336,15 +303,44 @@ async function fetchTile(z, x, y) {
         // Try progressively looser clearances so we always find a spot, but keep the house/pool buffer
         // as generous as fits: 42 ft (clears house + adjacent pool) → 34 → 28.
         let best = search(42, 26, 44) || search(34, 22, 44) || search(28, 16, 48);
-        if (best) { aduBox = best; aduSource = 'local-vision'; out.aduFitsSqFt = Math.round(side * side); }
-      } catch (e) { out.visionPlaceError = String(e.message || e); }
+        if (best) { aduBox = best; aduSource = 'local-classifier'; out.aduFitsSqFt = Math.round(side * side); }
+      } catch (e) { out.aduPlaceError = String(e.message || e); }
+    }
+    // Agent override: after LOOKING at the rendered map, the Copilot CLI agent (Opus 4.8) can pass a
+    // corrected ADU location via MOLE_ADU_HINT — either "lon,lat" or a grid-cell label like "G3" (labels
+    // are reported in out.cells). We place the box there, snapping to the nearest spot inside the
+    // buildable envelope where a full box fits. This is the self-correction hook.
+    if (biggest && process.env.MOLE_ADU_HINT) {
+      try {
+        const raw = process.env.MOLE_ADU_HINT.trim();
+        let pt = null;
+        const m = raw.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+        if (m) pt = [parseFloat(m[1]), parseFloat(m[2])];
+        else if (cellCenters[raw.toUpperCase()]) pt = cellCenters[raw.toUpperCase()];
+        if (pt) {
+          const fits = (ll) => mkBox(turf.point(ll)).geometry.coordinates[0].every(p => turf.booleanPointInPolygon(turf.point(p), biggest));
+          let target = fits(pt) ? pt : null;
+          if (!target) {
+            const bb2 = turf.bbox(biggest); let bD = Infinity;
+            for (let ix = 0; ix <= 48; ix++) for (let iy = 0; iy <= 48; iy++) {
+              const ll = [bb2[0] + (bb2[2] - bb2[0]) * ix / 48, bb2[1] + (bb2[3] - bb2[1]) * iy / 48];
+              if (!fits(ll)) continue;
+              const d = turf.distance(turf.point(ll), turf.point(pt), { units: 'feet' });
+              if (d < bD) { bD = d; target = ll; }
+            }
+          }
+          if (target) { aduBox = mkBox(turf.point(target)); aduSource = 'agent-corrected'; out.aduFitsSqFt = Math.round(side * side); out.aduHint = raw; }
+          else out.aduHintError = 'hint point has no fitting box inside the buildable envelope';
+        } else out.aduHintError = 'could not parse MOLE_ADU_HINT (use "lon,lat" or a cell label)';
+      } catch (e) { out.aduHintError = String(e.message || e); }
     }
     out.aduSource = aduSource;
-    out.visionCell = (visionResult && visionResult.adu && visionResult.adu.cell) || null;
+    // Expose the classified grid so the agent can reason about which cell is open vs house/pool/tree.
+    out.cells = groundCells.map(c => ({ label: c.label, kind: c.kind, lon: +c.ll[0].toFixed(6), lat: +c.ll[1].toFixed(6) }));
     if (aduBox) { const cc = turf.centroid(aduBox).geometry.coordinates; const [bx, by] = toPx(cc[0], cc[1]); out.aduPlacedNorm = { x: +(bx / W).toFixed(3), y: +(by / H).toFixed(3) }; }
 
-    // Site analysis: prefer the AOAI narrative when available, else synthesize a deterministic one from
-    // the free local pixel classification so the report always explains what the agent "saw."
+    // Site analysis: deterministic narrative synthesized from the free local pixel classification,
+    // so the report always explains what the agent "saw" on the aerial.
     const treeN = (out.ground && out.ground.tree) || 0, openN = (out.ground && out.ground.open) || 0;
     const poolN = (out.ground && out.ground.pool) || 0, bldgN = (out.ground && out.ground.building) || 0;
     const totalN = treeN + openN + poolN + bldgN || 1;
@@ -358,9 +354,7 @@ async function fetchTile(z, x, y) {
       concerns: treeN / totalN > 0.5 ? ['Lot is heavily wooded — clearing/tree removal likely required around the ADU envelope.'] : [],
       features: localFeatures,
     };
-    out.vision = visionResult
-      ? { summary: visionResult.summary, rationale: visionResult.adu && visionResult.adu.rationale, concerns: visionResult.concerns || [], features: (visionResult.features || []).map(f => ({ label: f.label, cell: f.cell })), cellsAssessed: visionResult.cells || null }
-      : localVision;
+    out.vision = localVision;
 
     drawFeat(poly, { stroke: '#ffe100', width: 4 });
     for (const p of envPieces) drawFeat(p, { stroke: '#39ff14', fill: 'rgba(57,255,20,0.30)', width: 3, dash: [10, 6] });
@@ -378,9 +372,9 @@ async function fetchTile(z, x, y) {
     for (const b of buildings) drawFeat(b, { stroke: '#ffffff', fill: 'rgba(255,255,255,0.35)', width: 2 });
     if (aduBox) drawFeat(aduBox, { stroke: '#ff3b30', fill: 'rgba(255,59,48,0.6)', width: 3 });
 
-    // Detected-feature markers (from the AOAI model if present, else the free local classifier).
+    // Detected-feature markers from the free local classifier.
     const featColors = { pool: '#00e5ff', driveway: '#d0d0d0', shed: '#ffb300', forest: '#7cff9b', water: '#2196f3', house: '#00a2ff' };
-    const featureList = (visionResult && Array.isArray(visionResult.features) && visionResult.features.length) ? visionResult.features : localFeatures;
+    const featureList = localFeatures;
     if (Array.isArray(featureList)) {
       const drawn = new Set();
       for (const f of featureList) {
@@ -402,7 +396,7 @@ async function fetchTile(z, x, y) {
 
     if (aduBox) {
       const c = turf.centroid(aduBox).geometry.coordinates; const [ax, ay] = toPx(c[0], c[1]);
-      const label = aduSource !== 'geometric' ? `ADU ~${Math.round(side * side)} sf (AI-placed)` : `ADU ~${Math.round(side * side)} sf`;
+      const label = `ADU ~${Math.round(side * side)} sf`;
       ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
       ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 4; ctx.strokeText(label, ax, ay - 12);
       ctx.fillStyle = '#fff'; ctx.fillText(label, ax, ay - 12);
