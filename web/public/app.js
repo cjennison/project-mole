@@ -6,6 +6,7 @@ const STEP_DEFS = [
   ['shoreland', 'Shoreland (RSA 483-B)'],
   ['wetlands', 'Wetlands screen'],
   ['environmental', 'Environmental & groundwater'],
+  ['vision', 'AI aerial site analysis'],
   ['sitemap', 'Rendering buildable-area map'],
 ];
 const $ = (s) => document.querySelector(s);
@@ -61,6 +62,21 @@ function renderResult(job) {
   card.appendChild(snap);
 
   if (job.mapUrl) { const img = el('img', 'mapimg'); img.src = job.mapUrl; img.alt = 'Buildable area map'; card.appendChild(img); }
+
+  if (r.siteAnalysis) {
+    card.appendChild(el('h3', 'sec', 'Site analysis — AI aerial review'));
+    if (r.siteAnalysis.summary) card.appendChild(el('p', 'analysis', r.siteAnalysis.summary));
+    if (r.siteAnalysis.rationale) { const p = el('p', 'analysis'); p.innerHTML = `<b>Recommended ADU location:</b> ${r.siteAnalysis.rationale}`; card.appendChild(p); }
+    if (r.siteAnalysis.features && r.siteAnalysis.features.length) {
+      const chips = el('div', 'featchips');
+      for (const f of r.siteAnalysis.features) chips.appendChild(el('span', 'featchip', f.label));
+      card.appendChild(el('div', 'k', 'Detected on the lot')); card.appendChild(chips);
+    }
+    if (r.siteAnalysis.concerns && r.siteAnalysis.concerns.length) {
+      card.appendChild(el('div', 'k', 'Verify before siting'));
+      const ul = el('ul', 'gaps'); for (const c of r.siteAnalysis.concerns) ul.appendChild(el('li', null, c)); card.appendChild(ul);
+    }
+  }
 
   card.appendChild(el('h3', 'sec', 'Feasibility gates'));
   const tbl = el('table', 'gates');

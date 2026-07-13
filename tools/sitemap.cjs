@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const turf = require('@turf/turf');
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
+let visionMod; try { visionMod = require('./vision.cjs'); } catch {}
 let emit = () => {}, flush = async () => {};
 
 const ADDRESS = process.argv[2];
@@ -190,12 +191,61 @@ async function fetchTile(z, x, y) {
       }
     };
     const drawLine = (a, b, style, width = 5) => { const [ax, ay] = toPx(a[0], a[1]), [bx, by] = toPx(b[0], b[1]); ctx.save(); ctx.strokeStyle = style; ctx.lineWidth = width; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.restore(); };
+    const fromPx = (px, py) => { const n = 256 * 2 ** z; const gx = px + originX, gy = py + originY; return [gx / n * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * gy / n))) * 180 / Math.PI]; };
+
+    // --- Vision analysis (Azure OpenAI GPT-5): mask everything OUTSIDE the parcel so the model
+    //     only reasons about this lot, detect obstacles, and get a practical ADU location. ---
+    let visionResult = null, aduSource = 'geometric';
+    if (visionMod && process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_KEY) {
+      try {
+        emit('vision', { status: 'start' });
+        const vc = createCanvas(W, H); const vx = vc.getContext('2d');
+        for (const [tx, ty, img] of tiles) vx.drawImage(img, (tx - tx0) * 256, (ty - ty0) * 256, 256, 256);
+        const tracePoly = (c2) => { c2.beginPath(); poly.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? c2.lineTo(x, y) : c2.moveTo(x, y); }); c2.closePath(); };
+        vx.save(); vx.beginPath(); vx.rect(0, 0, W, H); poly.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? vx.lineTo(x, y) : vx.moveTo(x, y); }); vx.closePath(); vx.fillStyle = 'rgba(0,0,0,0.62)'; vx.fill('evenodd'); vx.restore();
+        vx.strokeStyle = '#ffe100'; vx.lineWidth = 4; tracePoly(vx); vx.stroke();
+        visionResult = await visionMod.analyzeAerial(vc.toBuffer('image/png'), { lotSqFt: out.lotAreaSqFt, acres: +(out.lotAreaSqFt / 43560).toFixed(2) });
+        emit('vision', { status: 'ok' });
+      } catch (e) { out.visionError = String(e.message || e); emit('vision', { status: 'error', error: e }); }
+    }
+    // Place the ADU at the vision-recommended spot, clamped into the buildable envelope.
+    if (visionResult && visionResult.adu && typeof visionResult.adu.x === 'number' && biggest) {
+      try {
+        const [vlon, vlat] = fromPx(visionResult.adu.x * W, visionResult.adu.y * H);
+        let ctr = turf.point([vlon, vlat]);
+        if (!turf.booleanPointInPolygon(ctr, biggest)) {
+          const np = turf.nearestPointOnLine(turf.polygonToLine(biggest), ctr);
+          ctr = turf.destination(np, side * 0.8, turf.bearing(np, turf.centroid(biggest)), { units: 'feet' });
+        }
+        let vbox = mkBox(ctr);
+        if (!vbox.geometry.coordinates[0].every(c => turf.booleanPointInPolygon(turf.point(c), biggest))) {
+          ctr = turf.destination(ctr, side, turf.bearing(ctr, turf.centroid(biggest)), { units: 'feet' });
+          vbox = mkBox(ctr);
+        }
+        if (vbox.geometry.coordinates[0].every(c => turf.booleanPointInPolygon(turf.point(c), biggest))) { aduBox = vbox; aduSource = 'vision'; out.aduFitsSqFt = Math.round(side * side); }
+      } catch (e) { out.visionPlaceError = String(e.message || e); }
+    }
+    out.aduSource = aduSource;
+    out.vision = visionResult ? { summary: visionResult.summary, rationale: visionResult.adu && visionResult.adu.rationale, concerns: visionResult.concerns || [], features: (visionResult.features || []).map(f => ({ label: f.label, description: f.description })) } : null;
 
     drawFeat(poly, { stroke: '#ffe100', width: 4 });
-    drawLine(edges[frontIdx].a, edges[frontIdx].b, '#00d5ff', 6);           // front edge = cyan
     for (const p of envPieces) drawFeat(p, { stroke: '#39ff14', fill: 'rgba(57,255,20,0.30)', width: 3, dash: [10, 6] });
     for (const b of buildings) drawFeat(b, { stroke: '#ffffff', fill: 'rgba(255,255,255,0.35)', width: 2 });
     if (aduBox) drawFeat(aduBox, { stroke: '#ff3b30', fill: 'rgba(255,59,48,0.6)', width: 3 });
+
+    // Detected-feature markers from the vision model (pool/driveway/shed/forest/water).
+    const featColors = { pool: '#00e5ff', driveway: '#d0d0d0', shed: '#ffb300', forest: '#7cff9b', water: '#2196f3' };
+    if (visionResult && Array.isArray(visionResult.features)) {
+      for (const f of visionResult.features) {
+        if (!featColors[f.label] || typeof f.x !== 'number') continue;
+        const px = f.x * W, py = f.y * H;
+        ctx.fillStyle = featColors[f.label]; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(px, py, 6, 0, 7); ctx.fill(); ctx.stroke();
+        ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left';
+        ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 3; ctx.strokeText(f.label, px + 9, py + 4);
+        ctx.fillStyle = '#fff'; ctx.fillText(f.label, px + 9, py + 4);
+      }
+    }
 
     // house marker (largest building centroid, else parcel centroid)
     const houseC = buildings.length ? turf.centroid(buildings.sort((a, b) => turf.area(b) - turf.area(a))[0]).geometry.coordinates : center;
@@ -204,9 +254,10 @@ async function fetchTile(z, x, y) {
 
     if (aduBox) {
       const c = turf.centroid(aduBox).geometry.coordinates; const [ax, ay] = toPx(c[0], c[1]);
+      const label = aduSource === 'vision' ? `ADU ~${Math.round(side * side)} sf (AI-placed)` : `ADU ~${Math.round(side * side)} sf`;
       ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
-      ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 4; ctx.strokeText(`ADU ~${Math.round(side * side)} sf`, ax, ay);
-      ctx.fillStyle = '#fff'; ctx.fillText(`ADU ~${Math.round(side * side)} sf`, ax, ay);
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 4; ctx.strokeText(label, ax, ay - 12);
+      ctx.fillStyle = '#fff'; ctx.fillText(label, ax, ay - 12);
     }
 
     ctx.fillStyle = 'rgba(0,0,0,0.62)'; ctx.fillRect(0, 0, W, 46);
@@ -215,7 +266,7 @@ async function fetchTile(z, x, y) {
     ctx.font = '13px sans-serif';
     ctx.fillText(`PID ${pid} · ${sb.district} · setbacks F${sb.front}/S${sb.side}/R${sb.rear}ft · buildable ≈ ${out.buildableAreaSqFt.toLocaleString()} sf of ${out.lotAreaSqFt.toLocaleString()} sf`, 14, 40);
 
-    const legend = [['#ffe100', 'Parcel boundary'], ['#00d5ff', 'Front (street) edge'], ['#39ff14', 'Buildable area (per-edge setbacks)'], ['#ffffff', `Existing building${buildings.length ? '' : ' (none found)'}`], ['#ff3b30', 'Sample 900 sf ADU'], ['#00a2ff', 'House']];
+    const legend = [['#ffe100', 'Parcel boundary'], ['#39ff14', 'Buildable area (setbacks)'], ['#ff3b30', out.aduSource === 'vision' ? 'ADU — AI-placed in open area' : 'Sample 900 sf ADU'], ['#00e5ff', 'Detected feature (pool/forest/…)'], ['#00a2ff', 'House']];
     const lh = 20, lw = 300, ly0 = H - lh * legend.length - 14;
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(10, ly0 - 8, lw, lh * legend.length + 10);
     legend.forEach(([col, txt], i) => { const y = ly0 + i * lh; ctx.fillStyle = col; ctx.fillRect(16, y, 14, 12); ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(txt, 36, y + 11); });
@@ -228,7 +279,7 @@ async function fetchTile(z, x, y) {
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
     fs.writeFileSync(OUT, canvas.toBuffer('image/png'));
     out.ok = true; out.zoom = z; out.imageSize = `${W}x${H}`;
-    emit('sitemap', { status: 'ok', durationMs: Date.now() - t0, attributes: { pid, buildableAreaSqFt: out.buildableAreaSqFt, aduFits: !!out.aduFitsSqFt, buildingsCarved: out.buildingsCarved, zoom: z } });
+    emit('sitemap', { status: 'ok', durationMs: Date.now() - t0, attributes: { pid, buildableAreaSqFt: out.buildableAreaSqFt, aduFits: !!out.aduFitsSqFt, aduSource: out.aduSource, zoom: z } });
   } catch (e) {
     out.ok = false; out.error = String(e && e.message ? e.message : e);
     emit('sitemap', { status: 'error', durationMs: Date.now() - t0, error: e });

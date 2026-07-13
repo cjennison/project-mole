@@ -72,6 +72,10 @@ table.gates td.g { white-space: nowrap; font-weight: 600; width: 190px; }
 .tasks { display: grid; gap: 6px; padding: 0; margin: 0; list-style: none; }
 .tasks li { padding: 8px 10px; background: #fafbff; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
 .gaps { color: var(--muted); font-size: 13px; }
+.analysis { font-size: 14.5px; line-height: 1.55; color: var(--ink); margin: 8px 0; }
+.featchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.featchip { font-size: 12px; font-weight: 600; text-transform: capitalize; padding: 4px 10px; border-radius: 999px;
+  background: #eef2ff; color: var(--brand); border: 1px solid #dfe4ff; }
 .actions { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
 .actions a { font-size: 13px; color: var(--brand); text-decoration: none; border: 1px solid var(--line); padding: 8px 12px; border-radius: 10px; }
 .actions a:hover { border-color: var(--brand); }

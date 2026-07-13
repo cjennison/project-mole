@@ -66,7 +66,7 @@ async function processJob(job) {
     catch (e) { console.warn('map upload failed', e.message); }
   }
 
-  const report = buildReport(data, { buildableAreaSqFt: site?.buildableAreaSqFt, aduFitsSqFt: site?.aduFitsSqFt, mapUrl });
+  const report = buildReport(data, { buildableAreaSqFt: site?.buildableAreaSqFt, aduFitsSqFt: site?.aduFitsSqFt, mapUrl, vision: site?.vision, aduSource: site?.aduSource });
   await store.uploadBlob(`${id}.md`, report.markdown, 'text/markdown; charset=utf-8').catch(() => {});
   await store.uploadBlob(`${id}.json`, JSON.stringify({ data, report }, null, 2), 'application/json').catch(() => {});
   phases.push({ event: 'run_end', status: 'ok', at: new Date().toISOString() });
