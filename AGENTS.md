@@ -21,37 +21,39 @@ your own reasoning and vision are the intelligence in this system.
    ```
    node tools/report.mjs "<MOLE_ADDRESS>" "<MOLE_JOB_ID>"
    ```
-   It runs the deterministic pipeline, renders the map, builds the report, and prints a JSON
-   summary with the field **`gridImage`** (path to a zoomed, labeled decision image) plus the
-   classified `cells`. Collect data is cached, so re-runs only re-render (fast).
+   This runs the **engineering site-plan engine** (`tools/siteplan.cjs`): it classifies every
+   parcel grid cell as **CLEARING** (buildable open ground) vs **OBSTRUCTION** (tree canopy, a
+   roof/structure, pavement/deck, or a pool/water feature), renders a side-by-side
+   **[engineering schematic | aerial proof]** map, places the ADU on the clearing nearest the
+   house, builds the report, and prints a JSON summary with the field **`gridImage`** (a zoomed,
+   labeled decision image) plus the classified `cells` (kinds: `open`/`tree`/`building`/`pool`).
+   Collect data is cached, so re-runs only re-render (fast).
 
 2. **LOOK at the LABELED GRID image — this is your primary decision tool and the whole point of
    you being here:**
    ```
    view reports/<BASE>-grid.png     (the `gridImage` path; a zoomed aerial with lettered/numbered
-                                      cells like C4, F4, and the current ADU box outlined in RED)
+                                      cells like C4, O8, class tints, and the ADU box outlined in RED)
    ```
-   Go cell by cell and classify each labeled cell **with your own eyes** into one of:
-   **open lawn / cleared dirt**, **swimming pool**, **pool deck / patio**, **house / roof**,
-   **driveway / pavement**, or **trees/forest**.
-   ⚠️ The pixel classifier and any color tints are **UNRELIABLE for pools** — an in-ground pool
-   plus its decking usually reads as tan "open" ground, NOT blue. **Trust your eyes, not the tint
-   or the `cells.pool` list.** A pool is a smooth rectangular/oval basin, often with a distinct
-   deck border and different color/texture than grass.
+   The classifier now marks clearing vs obstruction (clearing = faint yellow, trees = green,
+   structure/pavement = gray, pool/water = blue). Still go cell by cell with **your own eyes** and
+   confirm what you see — a pool is a smooth rectangular/oval basin, often ringed by a deck of a
+   different colour/texture than grass. **Trust your eyes over the tint** on any ambiguous cell.
 
 3. **Judge the RED box.** It is WRONG if it sits on or touching a pool, pool deck/patio, driveway,
-   house/roof, or trees. The ADU must go on **genuinely OPEN LAWN or cleared ground, as close to
-   the house as practical** (e.g. the open cell just to the side of the pool), big enough for a
-   30×30 ft footprint, and NOT in the front yard between the house and the street.
+   house/roof, or trees. The ADU must go on **genuinely OPEN CLEARING, as close to the house as
+   practical** (e.g. the open ground just to the side of the pool), big enough for a 30×30 ft
+   footprint, and NOT in the front yard between the house and the street.
 
-4. **If it's wrong, move it and re-render.** Pick the best OPEN-LAWN cell label you SEE, then:
+4. **If it's wrong, move it and re-render.** Pick the best OPEN-CLEARING cell label you SEE, then:
    ```
-   MOLE_ADU_HINT="<cell label e.g. G4>" node tools/report.mjs "<MOLE_ADDRESS>" "<MOLE_JOB_ID>"
+   MOLE_ADU_HINT="<cell label e.g. O8>" node tools/report.mjs "<MOLE_ADDRESS>" "<MOLE_JOB_ID>"
    ```
-   **View the new `reports/<BASE>-grid.png` again** and confirm the red box is now fully on open
-   ground and clear of the pool/house/driveway/trees. Repeat (try adjacent cells) until it is
-   unambiguously correct. **Never finish while the ADU box is on a pool, patio, driveway, roof, or
-   trees.** If you are unsure whether a cell is open, zoom further (crop the PNG) before deciding.
+   The hint snaps to the nearest spot where a full box fits on clearings. **View the new
+   `reports/<BASE>-grid.png` again** and confirm the red box is now fully on open clearing and
+   clear of the pool/house/driveway/trees. Repeat (try adjacent cells) until it is unambiguously
+   correct. **Never finish while the ADU box is on a pool, patio, driveway, roof, or trees.** If
+   unsure whether a cell is open, zoom further (crop the PNG) before deciding.
 
 5. When the placement is genuinely correct, you're done rendering. The `.md`/`.json`/`.png` are
    already written for the worker to upload.
@@ -63,7 +65,7 @@ node tools/telemetry.mjs <event> <status> [key=value ...]
 ```
 Emit at least: `analysis start` (before reviewing the map), `placement ok cell=<X> iterations=<n>`
 (after you're satisfied with the ADU location), and `report_write ok verdict=<...>`.
-`collect.mjs` and `sitemap.cjs` already emit their own per-phase telemetry — don't repeat those.
+`collect.mjs` and `siteplan.cjs` already emit their own per-phase telemetry — don't repeat those.
 Telemetry works with no Azure configured — do NOT skip it.
 
 ## The rules to apply (read the knowledge base)
@@ -76,7 +78,7 @@ Full detail in `knowledge/nh-adu-playbook.md` and `knowledge/nh-data-sources.md`
 - **Environmental gates:** `flood.sfha === 'T'` → Special Flood Hazard Area (elevation +
   floodplain permit). `shoreland.applies === true` → NHDES shoreland permit + 50-ft setback.
   `wetlands.within100ft > 0` → possible RSA 482-A permit. Otherwise CLEARED.
-- **Dimensional fit:** the buildable envelope + ADU come from `sitemap.cjs`
+- **Dimensional fit:** the buildable envelope + ADU come from `siteplan.cjs`
   (`buildableAreaSqFt`, `aduFitsSqFt`). Confirm the lot meets `sfMinLotAcres` and frontage.
 - **Building code:** NH State Building Code = 2021 IRC/IBC.
 - If `parcel.addressMatch` is false, flag the discrepancy; treat parcel numbers as approximate.

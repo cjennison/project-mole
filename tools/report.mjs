@@ -63,9 +63,9 @@ function run(script, args) {
     fs.writeFileSync(dataPath, JSON.stringify(data));
   }
 
-  // 2) Render the site map (honours MOLE_ADU_HINT from the environment for agent corrections).
+  // 2) Render the engineering site plan + place the ADU (honours MOLE_ADU_HINT for agent corrections).
   const mapPath = path.join(REPORTS, `${BASE}.png`);
-  const s = await run('tools/sitemap.cjs', [ADDRESS, mapPath]);
+  const s = await run('tools/siteplan.cjs', [ADDRESS, mapPath]);
   const site = s.json || {};
 
   // 3) Build the deterministic report. mapUrl is the local filename; the worker rewrites it to the
