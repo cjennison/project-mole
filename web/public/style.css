@@ -81,3 +81,15 @@ table.gates td.g { white-space: nowrap; font-weight: 600; width: 190px; }
 .actions a:hover { border-color: var(--brand); }
 .foot { color: var(--muted); font-size: 12px; padding: 26px 20px 40px; text-align: center; }
 .err-box { color: var(--err); background: #fdecec; border: 1px solid #f7caca; padding: 12px 14px; border-radius: 10px; }
+
+/* Shareable report link */
+.sharebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 4px; }
+.sharebar .k { font-size: 12px; color: var(--muted); font-weight: 600; }
+.shareurl { flex: 1; min-width: 220px; font-size: 13px; padding: 8px 10px; border: 1px solid #d9dee6; border-radius: 8px; background: #f7f9fc; color: #333; }
+
+/* Owner sign-in gate */
+.search.locked .row, .search.locked .examples { opacity: .5; pointer-events: none; }
+.gate { margin-top: 14px; padding: 14px 16px; border: 1px dashed #c7cfdb; border-radius: 10px; background: #f7f9fc; }
+.gate-msg { margin: 0 0 10px; font-size: 14px; color: #444; }
+.signin { display: inline-block; background: var(--brand); color: #fff; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; }
+.signin:hover { filter: brightness(1.05); }

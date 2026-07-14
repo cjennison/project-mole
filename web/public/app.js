@@ -13,6 +13,15 @@ const $ = (s) => document.querySelector(s);
 const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
 
 let poll = null;
+let errStreak = 0;
+let me = { authenticated: false, isOwner: true, gated: false, name: null };
+
+function deepLinkId() {
+  const m = location.pathname.match(/^\/r\/([\w.-]+)$/);
+  if (m) return m[1];
+  return new URLSearchParams(location.search).get('id');
+}
+function setUrl(id) { try { history.pushState({ id }, '', '/r/' + id); } catch {} }
 
 function renderSteps(phases) {
   const byEvent = {};
@@ -52,6 +61,20 @@ function renderResult(job) {
   v.appendChild(el('div', 'badge ' + r.verdictClass, r.verdict));
   v.appendChild(el('div', 'sub', `${s.address}<br><b>${s.pid || '—'}</b> · ${s.district || '—'} · ${s.lotAcres ?? '?'} ac`));
   card.appendChild(v);
+
+  // Shareable link — anyone with this URL can view the report.
+  const shareUrl = `${location.origin}/r/${job.id}`;
+  const share = el('div', 'sharebar');
+  share.appendChild(el('span', 'k', 'Shareable link'));
+  const inp = el('input', 'shareurl'); inp.type = 'text'; inp.readOnly = true; inp.value = shareUrl;
+  inp.addEventListener('focus', () => inp.select());
+  const copy = el('button', 'chip', 'Copy');
+  copy.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(shareUrl); } catch { inp.select(); document.execCommand('copy'); }
+    copy.textContent = 'Copied!'; setTimeout(() => (copy.textContent = 'Copy'), 1500);
+  });
+  share.appendChild(inp); share.appendChild(copy);
+  card.appendChild(share);
 
   const snap = el('div', 'snapshot');
   const add = (k, val) => { const c = el('div', 'snap'); c.appendChild(el('div', 'k', k)); c.appendChild(el('div', 'v', val)); snap.appendChild(c); };
@@ -147,8 +170,20 @@ async function loadInsights(id, box) {
 }
 
 async function tick(id) {
-  const job = await fetch('/api/jobs/' + id).then(r => r.json()).catch(() => null);
+  let resp;
+  try { resp = await fetch('/api/jobs/' + id); } catch { return; }
+  if (resp.status === 404) {
+    if (++errStreak >= 3) {
+      clearInterval(poll); poll = null;
+      const res = $('#result'); res.innerHTML = ''; res.appendChild(el('div', 'card err-box', 'Report not found. Check the link or run a new analysis.'));
+      res.classList.remove('hidden'); $('#progress').classList.add('hidden');
+    }
+    return;
+  }
+  errStreak = 0;
+  const job = await resp.json().catch(() => null);
   if (!job || job.error) return;
+  if (job.address) $('#p-addr').textContent = job.address;
   statusPill(job.status);
   renderSteps(job.phases || []);
   if (job.status === 'done') { clearInterval(poll); poll = null; renderResult(job); }
@@ -159,18 +194,69 @@ async function tick(id) {
   }
 }
 
+// Open an existing report by id (deep link). Public — no auth required to view.
+function openReport(id) {
+  errStreak = 0;
+  $('#result').classList.add('hidden'); $('#result').innerHTML = '';
+  $('#progress').classList.remove('hidden');
+  $('#p-addr').textContent = '…'; statusPill('loading'); renderSteps([]);
+  if (poll) clearInterval(poll);
+  poll = setInterval(() => tick(id), 1500);
+  tick(id);
+}
+
 async function run(address) {
   $('#result').classList.add('hidden'); $('#result').innerHTML = '';
   $('#progress').classList.remove('hidden');
   $('#p-addr').textContent = address; statusPill('queued');
-  renderSteps([]);
-  const j = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address }) }).then(r => r.json());
-  if (j.error) { alert(j.error); return; }
+  renderSteps([]); errStreak = 0;
+  const resp = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address }) });
+  const j = await resp.json().catch(() => ({ error: 'request failed' }));
+  if (!resp.ok || j.error) {
+    $('#progress').classList.add('hidden');
+    if (resp.status === 401 || resp.status === 403) { renderGate(true); }
+    else alert(j.error || 'Could not start the run.');
+    return;
+  }
+  setUrl(j.id);
   if (poll) clearInterval(poll);
   poll = setInterval(() => tick(j.id), 1500);
   tick(j.id);
 }
 
+// --- Owner gating: only the owner can create runs; anyone can view reports by link. ---
+function renderGate(force) {
+  const search = $('.search'); if (!search) return;
+  let gate = $('#gate');
+  if (me.isOwner && !force) { if (gate) gate.remove(); search.classList.remove('locked'); return; }
+  search.classList.add('locked');
+  if (!gate) {
+    gate = el('div', 'gate'); gate.id = 'gate';
+    search.appendChild(gate);
+  }
+  gate.innerHTML = '';
+  const msg = me.authenticated
+    ? `Signed in as <b>${me.name}</b>, but this account can’t create runs. Reports remain viewable by link.`
+    : 'Running a feasibility analysis is restricted to the owner. Anyone can view a report from its link.';
+  gate.appendChild(el('p', 'gate-msg', msg));
+  const a = el('a', 'signin');
+  a.href = '/.auth/login/github?post_login_redirect_uri=' + encodeURIComponent(location.pathname + location.search);
+  a.textContent = me.authenticated ? 'Switch account' : 'Sign in with GitHub to run';
+  gate.appendChild(a);
+}
+
+async function loadMe() {
+  try { me = await fetch('/api/me').then(r => r.json()); } catch { me = { authenticated: false, isOwner: true, gated: false }; }
+  const go = $('#go');
+  if (go) go.disabled = me.gated && !me.isOwner;
+  renderGate(false);
+}
+
 $('#go').addEventListener('click', () => { const a = $('#addr').value.trim(); if (a) run(a); });
 $('#addr').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#go').click(); });
 document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => { $('#addr').value = c.dataset.a; run(c.dataset.a); }));
+window.addEventListener('popstate', () => { const id = deepLinkId(); if (id) openReport(id); });
+
+// Boot: learn who we are (gate the run UI), then open a deep-linked report if the URL has one.
+loadMe();
+{ const id = deepLinkId(); if (id) openReport(id); }
