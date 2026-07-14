@@ -248,6 +248,31 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     const obstrCells = cells.filter(c => OBSTRUCTION.has(c.kind));
     const clearingCells = cells.filter(c => c.kind === 'clearing');
     const nearAny = (ll, arr, ft) => arr.some(c => turf.distance(turf.point(ll), turf.point(c.ll), { units: 'feet' }) < ft);
+
+    // --- Effective ADU-eligible area: ALL open CLEARING ground inside the buildable envelope,
+    //     dissolved into one polygon (holes = obstructions). This is the WHOLE usable region — the
+    //     ADU can be sited anywhere within it — shown with its total square footage. ---------------
+    const cellSquare = (ll) => {
+      const h = (CELL_FT * 1.06) / 2, p = turf.point(ll);
+      const nLat = turf.destination(p, h, 0, { units: 'feet' }).geometry.coordinates[1];
+      const sLat = turf.destination(p, h, 180, { units: 'feet' }).geometry.coordinates[1];
+      const eLon = turf.destination(p, h, 90, { units: 'feet' }).geometry.coordinates[0];
+      const wLon = turf.destination(p, h, 270, { units: 'feet' }).geometry.coordinates[0];
+      return turf.polygon([[[wLon, nLat], [eLon, nLat], [eLon, sLat], [wLon, sLat], [wLon, nLat]]]);
+    };
+    const eligibleCells = clearingCells.filter(c => turf.booleanPointInPolygon(turf.point(c.ll), buildable));
+    let effectiveArea = null, effectivePieces = [];
+    if (eligibleCells.length) {
+      try {
+        const squares = eligibleCells.map(c => cellSquare(c.ll));
+        effectiveArea = squares.length === 1 ? squares[0] : turf.union(turf.featureCollection(squares));
+        if (effectiveArea) { try { effectiveArea = turf.intersect(turf.featureCollection([effectiveArea, buildable])) || effectiveArea; } catch {} }
+      } catch (e) { effectiveArea = null; out.effectiveAreaError = String(e.message || e); }
+      const pcs = !effectiveArea ? [] : (effectiveArea.geometry.type === 'Polygon' ? [effectiveArea] : effectiveArea.geometry.coordinates.map(c => turf.polygon(c)));
+      effectivePieces = pcs.filter(p => turf.area(p) * 10.7639 > 120).sort((a, b) => turf.area(b) - turf.area(a));
+    }
+    out.effectiveAreaSqFt = Math.round(effectivePieces.reduce((s, p) => s + turf.area(p), 0) * 10.7639);
+    out.effectiveAreaCount = effectivePieces.length;
     // Box footprint (grown by `padFt` for separation) must contain no obstruction cell centers.
     const mkBoxExp = (ll, extraFt) => { const hd = ((aduSideFt + 2 * extraFt) / 2) * Math.SQRT2; return turf.polygon([[45, 135, 225, 315, 45].map(bd => turf.destination(turf.point(ll), hd, bd + principalBearing, { units: 'feet' }).geometry.coordinates)]); };
     const footprintClear = (ll, padFt) => {
@@ -326,7 +351,7 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.font = 'bold 20px sans-serif';
     ctx.fillText(`Site plan — ${addr || ADDRESS}`, 14, 24);
     ctx.font = '13px sans-serif'; ctx.fillStyle = '#c9d1d9';
-    ctx.fillText(`PID ${pid} · ${sb.district} · setbacks F${sb.front}/S${sb.side}/R${sb.rear}ft · buildable ≈ ${out.buildableAreaSqFt.toLocaleString()} sf of ${out.lotAreaSqFt.toLocaleString()} sf · grid ${CELL_FT}ft`, 14, 44);
+    ctx.fillText(`PID ${pid} · ${sb.district} · setbacks F${sb.front}/S${sb.side}/R${sb.rear}ft · buildable ≈ ${out.buildableAreaSqFt.toLocaleString()} sf · ADU-eligible open ≈ ${out.effectiveAreaSqFt.toLocaleString()} sf of ${out.lotAreaSqFt.toLocaleString()} sf lot · grid ${CELL_FT}ft`, 14, 44);
 
     // Panel drawing helpers (offset x)
     const drawPanel = (ox, mode) => {
@@ -355,6 +380,19 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
       // parcel + buildable outline
       ctx.strokeStyle = '#ffe100'; ctx.lineWidth = 3; ctx.beginPath(); ring.forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? ctx.lineTo(ox + x, headH + y) : ctx.moveTo(ox + x, headH + y); }); ctx.closePath(); ctx.stroke();
       for (const p of envPieces) { ctx.strokeStyle = 'rgba(57,255,20,0.9)'; ctx.setLineDash([9, 6]); ctx.lineWidth = 2; ctx.beginPath(); p.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? ctx.lineTo(ox + x, headH + y) : ctx.moveTo(ox + x, headH + y); }); ctx.closePath(); ctx.stroke(); ctx.setLineDash([]); }
+      // effective ADU-eligible area (whole usable open region) — filled + bold outline; holes = obstructions
+      for (const p of effectivePieces) {
+        ctx.beginPath();
+        p.geometry.coordinates.forEach((rc) => { rc.forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? ctx.lineTo(ox + x, headH + y) : ctx.moveTo(ox + x, headH + y); }); ctx.closePath(); });
+        ctx.fillStyle = mode === 'schematic' ? 'rgba(0,230,118,0.32)' : 'rgba(0,230,118,0.28)'; ctx.fill('evenodd');
+        ctx.strokeStyle = '#00e676'; ctx.setLineDash([]); ctx.lineWidth = 3; ctx.stroke();
+      }
+      if (effectivePieces.length) {
+        const bp = turf.bbox(effectivePieces[0]); const [elx, ely] = toPx((bp[0] + bp[2]) / 2, bp[3]);
+        ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
+        ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 4; ctx.strokeText(`${out.effectiveAreaSqFt.toLocaleString()} sf usable`, ox + elx, headH + ely + 14);
+        ctx.fillStyle = '#b9ffcf'; ctx.fillText(`${out.effectiveAreaSqFt.toLocaleString()} sf usable`, ox + elx, headH + ely + 14);
+      }
       // house marker
       const [hx, hy] = toPx(houseAnchor.geometry.coordinates[0], houseAnchor.geometry.coordinates[1]);
       ctx.fillStyle = '#00a2ff'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ox + hx, headH + hy, 6, 0, 7); ctx.fill(); ctx.stroke();
@@ -376,10 +414,10 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     drawPanel(panelW + gap, 'aerial');
 
     // Legend under schematic
-    const legend = [['#38b000', 'Clearing (buildable ground)'], ['#1b5e20', 'Trees / canopy'], ['#9e9e9e', 'Structure / pavement'], ['#1e88e5', 'Water / pool'], ['#ff3b30', 'ADU placement'], ['#00a2ff', 'House']];
+    const legend = [['#38b000', 'Clearing (buildable ground)'], ['#00e676', 'ADU-eligible open area (polygon)'], ['#1b5e20', 'Trees / canopy'], ['#9e9e9e', 'Structure / pavement'], ['#1e88e5', 'Water / pool'], ['#ff3b30', 'ADU 900 sf (sample placement)'], ['#00a2ff', 'House']];
     let lx = 14, ly = headH + panelH - 16;
     ctx.font = '12px sans-serif';
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(8, ly - 16, 640, 24);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(8, ly - 16, 900, 24);
     for (const [col, txt] of legend) { ctx.fillStyle = col; ctx.fillRect(lx, ly - 11, 13, 12); ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(txt, lx + 18, ly); lx += ctx.measureText(txt).width + 42; }
 
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
@@ -394,7 +432,7 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     if (cc.water) features.push({ label: 'pool', cell: (cells.find(c => c.kind === 'water') || {}).label });
     if (cc.tree) { const t = cells.filter(c => c.kind === 'tree').sort((a, b) => turf.distance(turf.point(a.ll), turf.centroid(poly)) - turf.distance(turf.point(b.ll), turf.centroid(poly)))[0]; if (t) features.push({ label: 'forest', cell: t.label }); }
     out.vision = {
-      summary: `Aerial classified into a ${CELL_FT}-ft grid — clearing vs obstruction: ~${Math.round((cc.clearing || 0) / totalN * 100)}% open clearing, ~${Math.round((cc.tree || 0) / totalN * 100)}% tree canopy${cc.water ? ', a pool/water feature' : ''}${cc.structure ? ', and structures/pavement' : ''}. The ADU is placed on the open clearing nearest the house, clear of trees, pavement and the pool.`,
+      summary: `Aerial classified into a ${CELL_FT}-ft grid — clearing vs obstruction: ~${Math.round((cc.clearing || 0) / totalN * 100)}% open clearing, ~${Math.round((cc.tree || 0) / totalN * 100)}% tree canopy${cc.water ? ', a pool/water feature' : ''}${cc.structure ? ', and structures/pavement' : ''}. The ADU-eligible open area (all buildable clearing within the setbacks) totals ≈ ${out.effectiveAreaSqFt.toLocaleString()} sf${effectivePieces.length > 1 ? ` across ${effectivePieces.length} areas` : ''} — the ADU can be sited anywhere within that green polygon; the red box is one ${out.aduFitsSqFt || 900} sf placement nearest the house.`,
       rationale: aduBox ? `Open clearing${out.aduCell ? ` at grid cell ${out.aduCell}` : ''} — the closest buildable, unobstructed ground to the house where a full ${out.aduFitsSqFt} sf ADU fits within the setbacks, clear of the pool/structures and the forest.` : 'No open clearing large enough for a full ADU was found clear of trees, structures and water.',
       concerns: (cc.tree || 0) / totalN > 0.5 ? ['Lot is heavily wooded — clearing/tree removal likely required around the ADU envelope.'] : [],
       features: features.filter(f => f.cell),
@@ -418,6 +456,12 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
         gx2.fillStyle = '#fff'; gx2.fillText(c.label, px, py + 4);
       }
       if (aduBox) { gx2.strokeStyle = '#ff3b30'; gx2.lineWidth = 4; gx2.beginPath(); aduBox.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? gx2.lineTo(x, y) : gx2.moveTo(x, y); }); gx2.closePath(); gx2.stroke(); }
+      // whole ADU-eligible open area outline (green) so the agent sees the full usable region
+      for (const p of effectivePieces) {
+        gx2.beginPath();
+        p.geometry.coordinates.forEach((rc) => { rc.forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? gx2.lineTo(x, y) : gx2.moveTo(x, y); }); gx2.closePath(); });
+        gx2.strokeStyle = '#00e676'; gx2.setLineDash([]); gx2.lineWidth = 3; gx2.stroke();
+      }
       // Zoom into the developed cluster (house + pool + clearing) so features are large and unmistakable.
       const hcog = buildings.length ? turf.centroid(buildings.sort((a, b) => turf.area(b) - turf.area(a))[0]).geometry.coordinates : center;
       const [hcx, hcy] = toPx(hcog[0], hcog[1]);

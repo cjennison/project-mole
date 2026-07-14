@@ -23,27 +23,31 @@ your own reasoning and vision are the intelligence in this system.
    ```
    This runs the **engineering site-plan engine** (`tools/siteplan.cjs`): it classifies every
    parcel grid cell as **CLEARING** (buildable open ground) vs **OBSTRUCTION** (tree canopy, a
-   roof/structure, pavement/deck, or a pool/water feature), renders a side-by-side
-   **[engineering schematic | aerial proof]** map, places the ADU on the clearing nearest the
-   house, builds the report, and prints a JSON summary with the field **`gridImage`** (a zoomed,
-   labeled decision image) plus the classified `cells` (kinds: `open`/`tree`/`building`/`pool`).
-   Collect data is cached, so re-runs only re-render (fast).
+   roof/structure, pavement/deck, or a pool/water feature), dissolves ALL the clearing inside the
+   setbacks into **one green ADU-eligible area polygon** (reported as `effectiveAreaSqFt` — the
+   whole usable region, with holes at obstructions, where an ADU can be sited anywhere), renders a
+   side-by-side **[engineering schematic | aerial proof]** map, places a **sample 900 sf ADU box**
+   on the clearing nearest the house, builds the report, and prints a JSON summary with the field
+   **`gridImage`** (a zoomed, labeled decision image) plus the classified `cells` (kinds:
+   `open`/`tree`/`building`/`pool`). Collect data is cached, so re-runs only re-render (fast).
 
 2. **LOOK at the LABELED GRID image — this is your primary decision tool and the whole point of
    you being here:**
    ```
    view reports/<BASE>-grid.png     (the `gridImage` path; a zoomed aerial with lettered/numbered
-                                      cells like C4, O8, class tints, and the ADU box outlined in RED)
+                                      cells like C4, O8, class tints, the GREEN ADU-eligible area
+                                      outline, and the sample ADU box outlined in RED)
    ```
    The classifier now marks clearing vs obstruction (clearing = faint yellow, trees = green,
    structure/pavement = gray, pool/water = blue). Still go cell by cell with **your own eyes** and
    confirm what you see — a pool is a smooth rectangular/oval basin, often ringed by a deck of a
    different colour/texture than grass. **Trust your eyes over the tint** on any ambiguous cell.
 
-3. **Judge the RED box.** It is WRONG if it sits on or touching a pool, pool deck/patio, driveway,
-   house/roof, or trees. The ADU must go on **genuinely OPEN CLEARING, as close to the house as
-   practical** (e.g. the open ground just to the side of the pool), big enough for a 30×30 ft
-   footprint, and NOT in the front yard between the house and the street.
+3. **Judge the GREEN area AND the RED box.** The green ADU-eligible polygon is WRONG if it covers
+   any pool, deck/patio, driveway, roof, or trees; the red sample box is WRONG if it sits on or
+   touching any of those. Both must lie on **genuinely OPEN CLEARING, as close to the house as
+   practical** (e.g. the open ground just to the side of the pool), the box big enough for a
+   30×30 ft footprint, and NOT in the front yard between the house and the street.
 
 4. **If it's wrong, move it and re-render.** Pick the best OPEN-CLEARING cell label you SEE, then:
    ```
