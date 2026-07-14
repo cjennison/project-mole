@@ -42,21 +42,31 @@ your own reasoning and vision are the intelligence in this system.
    structure/pavement = gray, pool/water = blue). Still go cell by cell with **your own eyes** and
    confirm what you see — a pool is a smooth rectangular/oval basin, often ringed by a deck of a
    different colour/texture than grass. **Trust your eyes over the tint** on any ambiguous cell.
+   ⚠️ **POOL-HOUSE TRAP:** the classifier CANNOT see a pool house / pool-equipment shed / pool
+   deck — their flat tan roofs and tan-concrete aprons read as "clearing" (tan open ground), NOT
+   gray structure or blue water. A detected pool is almost always ringed by this tan apron plus a
+   small outbuilding right beside it. **The tan ground immediately around a pool is the pool
+   deck/pool house, not lawn** — do NOT site the ADU there.
 
 3. **Judge the GREEN area AND the RED box.** The green ADU-eligible polygon is WRONG if it covers
    any pool, deck/patio, driveway, roof, or trees; the red sample box is WRONG if it sits on or
-   touching any of those. Both must lie on **genuinely OPEN CLEARING, as close to the house as
-   practical** (e.g. the open ground just to the side of the pool), the box big enough for a
-   30×30 ft footprint, and NOT in the front yard between the house and the street.
+   touching any of those — **including the tan pool apron / pool house next to a pool.** Both must
+   lie on **genuinely OPEN CLEARING**, big enough for a 30×30 ft footprint, as close to the house
+   as practical BUT a clear buffer (≥ ~30 ft / a couple of cells) away from the WHOLE pool cluster
+   (pool + deck + pool house) — out on the larger open field/lawn, and NOT in the front yard
+   between the house and the street.
 
-4. **If it's wrong, move it and re-render.** Pick the best OPEN-CLEARING cell label you SEE, then:
+4. **If it's wrong, move it and re-render.** Pick the best OPEN-CLEARING cell label you SEE — one
+   well clear of the pool cluster (the open field away from the pool, NOT the tan apron hugging
+   it) — then:
    ```
    MOLE_ADU_HINT="<cell label e.g. O8>" node tools/report.mjs "<MOLE_ADDRESS>" "<MOLE_JOB_ID>"
    ```
    The hint snaps to the nearest spot where a full box fits on clearings. **View the new
    `reports/<BASE>-grid.png` again** and confirm the red box is now fully on open clearing and
-   clear of the pool/house/driveway/trees. Repeat (try adjacent cells) until it is unambiguously
-   correct. **Never finish while the ADU box is on a pool, patio, driveway, roof, or trees.** If
+   clear of the pool cluster/house/driveway/trees. Repeat (try adjacent cells) until it is
+   unambiguously correct. **Never finish while the ADU box is on a pool, pool deck, pool house,
+   patio, driveway, roof, or trees.** If
    unsure whether a cell is open, zoom further (crop the PNG) before deciding.
 
 5. When the placement is genuinely correct, you're done rendering. The `.md`/`.json`/`.png` are

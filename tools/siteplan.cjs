@@ -253,6 +253,10 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
 
     const obstrCells = cells.filter(c => OBSTRUCTION.has(c.kind));
     const clearingCells = cells.filter(c => c.kind === 'clearing');
+    // Pool clusters: a detected pool is almost always ringed by a deck/patio and a pool house/equipment
+    // shed whose tan roofs read as "clearing" (the classifier CANNOT see them). Keep the ADU well clear
+    // of the whole pool apron by buffering detected water cells far more than ordinary obstructions.
+    const waterCells = cells.filter(c => c.kind === 'water');
     const nearAny = (ll, arr, ft) => arr.some(c => turf.distance(turf.point(ll), turf.point(c.ll), { units: 'feet' }) < ft);
 
     // --- Effective ADU-eligible area: ALL open CLEARING ground inside the buildable envelope,
@@ -288,12 +292,14 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     };
     const bbx = turf.bbox(buildable);
     const search = (obFt, padFt, N) => {
+      const waterFt = obFt + 40;                                     // pool apron (deck + pool house) buffer
       let best = null, bestD = Infinity;
       for (let ix = 0; ix <= N; ix++) for (let iy = 0; iy <= N; iy++) {
         const ll = [bbx[0] + (bbx[2] - bbx[0]) * ix / N, bbx[1] + (bbx[3] - bbx[1]) * iy / N];
         const ctr = turf.point(ll);
         if (!turf.booleanPointInPolygon(ctr, buildable)) continue;
         if (nearAny(ll, obstrCells, obFt)) continue;                 // keep clear of any obstruction cell
+        if (nearAny(ll, waterCells, waterFt)) continue;              // keep well clear of the whole pool cluster
         if (!footprintClear(ll, padFt)) continue;                    // footprint (+pad) sits only on clearings
         const box = mkBox(ll);
         if (!box.geometry.coordinates[0].every(p => turf.booleanPointInPolygon(turf.point(p), buildable))) continue;
