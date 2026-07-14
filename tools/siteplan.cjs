@@ -129,15 +129,21 @@ function classifyCell(data) {
   //   pavement/roof-> low-saturation gray, high-texture ridges/edges, or bright gray
   //   water/pool   -> blue is max and the cell is COOL (warm<0)
 
-  // 1) Water / pool: blue dominant & cool (dark navy OR turquoise).
-  if (mB >= mR && mB >= mG - 2 && warm < -4 && bright < 175) return { kind: 'water', f };
+  // 1) Water / pool: blue-dominant, cool, dark AND SMOOTH (a basin). Brightness + texture caps keep
+  //    bluish-gray roofs and shadows out (validated: 1325 pool L8 bri49/tex16 stays water; the 545
+  //    Front dark-roof cells at bri90+/tex40+ drop out).
+  if (mB >= mR && mB >= mG - 2 && warm < -4 && bright < 80 && tex < 24) return { kind: 'water', f };
 
   // 2) Near-black = deep shadow / dense canopy -> obstruction.
   if (bright < 42) return { kind: 'tree', f };
 
-  // 3) Tree canopy: green & dark, or dense mid-green that isn't warm (dry ground is warm; canopy isn't).
-  if (gEx > 8 && bright < 80) return { kind: 'tree', f };
-  if (gEx > 14 && warm < 12 && bright < 115) return { kind: 'tree', f };
+  // 3) Tree canopy: GREEN and either cool/neutral (leaf foliage) or genuinely dark. Warm green is
+  //    grass/lawn (buildable) — a warm cell (warm>=12) that is also reasonably bright is NOT a tree.
+  //    Validated on 36 Youville St: lawn cells (bri56-78, warm19-34) fall through to clearing while
+  //    real canopy (cool green, or bright<55) stays tree.
+  if (gEx > 8 && bright < 80 && warm < 12) return { kind: 'tree', f };   // green, not warm like grass
+  if (gEx > 8 && bright < 55) return { kind: 'tree', f };                 // dark shadowed green (even if warmish)
+  if (gEx > 14 && warm < 12 && bright < 115) return { kind: 'tree', f };  // dense mid-green canopy
 
   // 4) Structure / impervious (roof, pavement, deck) — the ADU must avoid these.
   if ((mR - mG) > 28 && gEx < -8) return { kind: 'structure', f };        // strong red/orange roof
