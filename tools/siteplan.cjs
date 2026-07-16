@@ -171,9 +171,24 @@ function classifyCell(data) {
   return { kind: 'clearing', f };
 }
 
-const OBSTRUCTION = new Set(['tree', 'structure', 'water']);
-const CLASS_COLOR = { clearing: '#38b000', tree: '#1b5e20', structure: '#9e9e9e', water: '#1e88e5' };
-const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)', structure: 'rgba(150,150,150,0.55)', water: 'rgba(30,136,229,0.55)' };
+const OBSTRUCTION = new Set(['tree', 'structure', 'water', 'house', 'driveway']);
+// HARD obstructions can never host an ADU. Trees are SOFT — they can be cleared, so they block the
+// "as-is" scenario but are buildable in the "with tree clearing" scenario.
+const HARD_OBSTRUCTION = new Set(['structure', 'water', 'house', 'driveway']);
+const CLASS_COLOR = { clearing: '#38b000', tree: '#1b5e20', structure: '#9e9e9e', water: '#1e88e5', house: '#f2b705', driveway: '#8d6e63' };
+const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)', structure: 'rgba(150,150,150,0.55)', water: 'rgba(30,136,229,0.55)', house: 'rgba(242,183,5,0.55)', driveway: 'rgba(141,110,59,0.55)' };
+const CLEAR_TO_BUILD_TINT = 'rgba(255,145,0,0.55)';   // trees that would be removed to site the ADU
+
+// Agent (Copilot vision) classification vocabulary -> internal cell kind. The agent LOOKS at the
+// labeled grid and tags cells; this maps its words to our kinds. Trees/clearable both -> tree (soft).
+const AGENT_KIND = {
+  house: 'house', roof: 'house', building: 'house', structure: 'structure', shed: 'structure',
+  garage: 'structure', deck: 'structure', patio: 'structure', pavement: 'structure',
+  driveway: 'driveway', drive: 'driveway', road: 'driveway',
+  pool: 'water', water: 'water',
+  lawn: 'clearing', grass: 'clearing', clearing: 'clearing', open: 'clearing', field: 'clearing',
+  tree: 'tree', trees: 'tree', forest: 'tree', canopy: 'tree', woods: 'tree', clearable: 'tree',
+};
 
 (async () => {
   try { const t = await import('./telemetry.mjs'); emit = t.emit; flush = t.flush; } catch {}
@@ -252,14 +267,54 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
         cells.push(cell); cellByLabel[label] = cell;
       }
     }
+    // --- Agent vision override: once the Copilot agent has LOOKED at the labeled grid and tagged
+    //     cells, its classification wins over the pixel prior. File: MOLE_CLASSES_FILE or the
+    //     sibling <base>.classes.json. Shape: { "house":["B3"], "driveway":["A5"], "trees":[...],
+    //     "clearable":[...], "lawn":[...], "pool":[...] }. Unlisted cells keep the pixel prior. ----
+    out.agentClassified = false;
+    try {
+      const cf = process.env.MOLE_CLASSES_FILE || OUT.replace(/\.png$/i, '.classes.json');
+      if (fs.existsSync(cf)) {
+        const spec = JSON.parse(fs.readFileSync(cf, 'utf8'));
+        let applied = 0;
+        for (const [type, labels] of Object.entries(spec)) {
+          const kind = AGENT_KIND[String(type).toLowerCase()];
+          if (!kind || !Array.isArray(labels)) continue;
+          for (const lbl of labels) {
+            const c = cellByLabel[String(lbl).toUpperCase()];
+            if (c) { c.kind = kind; c.classSource = 'agent'; applied++; }
+          }
+        }
+        out.agentClassified = applied > 0;
+        out.agentClassCount = applied;
+        out.classesFile = path.basename(cf);
+      }
+    } catch (e) { out.agentClassError = String(e.message || e); }
     out.classCounts = cells.reduce((a, c) => (a[c.kind] = (a[c.kind] || 0) + 1, a), {});
     emit('vision', { status: 'ok', attributes: { classZoom: z, cells: cells.length, ...out.classCounts } });
 
     // --- Place the ADU: largest 30x30 ft footprint that sits ONLY on clearing cells, inside the
     //     buildable envelope, clear of obstruction cells, chosen NEAREST the house. -----------------
-    const houseAnchor = buildings.length
-      ? turf.centroid(buildings.sort((a, b) => turf.area(b) - turf.area(a))[0])
-      : turf.point([gc.lon, gc.lat]);
+    const houseCells = cells.filter(c => c.kind === 'house');
+    const structureCells = cells.filter(c => c.kind === 'structure');
+    let houseAnchor, houseSource;
+    if (houseCells.length) {
+      houseAnchor = turf.centroid(turf.featureCollection(houseCells.map(c => turf.point(c.ll)))); houseSource = 'agent';
+    } else if (buildings.length) {
+      houseAnchor = turf.centroid(buildings.sort((a, b) => turf.area(b) - turf.area(a))[0]); houseSource = 'usa-structures';
+    } else if (structureCells.length) {
+      // Pixel fallback: centroid of the structure-cell cluster nearest the parcel centroid — far
+      // better than the raw geocode (which can be >150m off) when USA Structures misses a
+      // tree-obscured house (the Amherst failure mode).
+      const pc = turf.centroid(poly);
+      const seed = structureCells.map(c => ({ c, d: turf.distance(turf.point(c.ll), pc, { units: 'feet' }) })).sort((a, b) => a.d - b.d)[0].c;
+      const cluster = structureCells.filter(c => turf.distance(turf.point(c.ll), turf.point(seed.ll), { units: 'feet' }) < 60);
+      houseAnchor = turf.centroid(turf.featureCollection(cluster.map(c => turf.point(c.ll)))); houseSource = 'structure-cluster';
+    } else {
+      houseAnchor = turf.point([gc.lon, gc.lat]); houseSource = 'geocode';
+    }
+    out.houseSource = houseSource;
+    out.houseCells = houseCells.map(c => c.label);
     const aduSideFt = Math.sqrt(Math.min(sb.aduMaxSqFt || 900, 900)); // ~30 ft
     const halfDiag = (aduSideFt / 2) * Math.SQRT2;
     // Align ADU to the parcel's principal axis.
@@ -268,6 +323,8 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     const mkBox = (ll) => turf.polygon([[45, 135, 225, 315, 45].map(bd => turf.destination(turf.point(ll), halfDiag, bd + principalBearing, { units: 'feet' }).geometry.coordinates)]);
 
     const obstrCells = cells.filter(c => OBSTRUCTION.has(c.kind));
+    const hardCells = cells.filter(c => HARD_OBSTRUCTION.has(c.kind));
+    const treeCells = cells.filter(c => c.kind === 'tree');
     const clearingCells = cells.filter(c => c.kind === 'clearing');
     // Pool clusters: a detected pool is almost always ringed by a deck/patio and a pool house/equipment
     // shed whose tan roofs read as "clearing" (the classifier CANNOT see them). Keep the ADU well clear
@@ -304,24 +361,30 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     // Tree canopy INSIDE the buildable envelope = ground you could unlock by clearing trees.
     const treeInBuildable = cells.filter(c => c.kind === 'tree' && turf.booleanPointInPolygon(turf.point(c.ll), buildable)).length;
     out.clearableTreeSqFt = Math.round(treeInBuildable * CELL_FT * CELL_FT);
+    // With-clearing eligible area = clearing + (removable) tree cells inside the envelope, minus hard
+    // obstructions. Shown so the report can quantify the "feasible if you clear trees" scenario.
+    const withClearingCells = cells.filter(c => (c.kind === 'clearing' || c.kind === 'tree') && turf.booleanPointInPolygon(turf.point(c.ll), buildable));
+    out.effectiveWithClearingSqFt = Math.round(withClearingCells.length * CELL_FT * CELL_FT);
     // Box footprint (grown by `padFt` for separation) must contain no obstruction cell centers.
     const mkBoxExp = (ll, extraFt) => { const hd = ((aduSideFt + 2 * extraFt) / 2) * Math.SQRT2; return turf.polygon([[45, 135, 225, 315, 45].map(bd => turf.destination(turf.point(ll), hd, bd + principalBearing, { units: 'feet' }).geometry.coordinates)]); };
-    const footprintClear = (ll, padFt) => {
+    const footprintClear = (ll, padFt, hardOnly) => {
       const box = mkBoxExp(ll, padFt);
-      for (const c of cells) { if (OBSTRUCTION.has(c.kind) && turf.booleanPointInPolygon(turf.point(c.ll), box)) return false; }
+      const set = hardOnly ? HARD_OBSTRUCTION : OBSTRUCTION;
+      for (const c of cells) { if (set.has(c.kind) && turf.booleanPointInPolygon(turf.point(c.ll), box)) return false; }
       return true;
     };
     const bbx = turf.bbox(buildable);
-    const search = (obFt, padFt, N) => {
+    const search = (obFt, padFt, N, hardOnly) => {
+      const blockers = hardOnly ? hardCells : obstrCells;
       const waterFt = obFt + 40;                                     // pool apron (deck + pool house) buffer
       let best = null, bestD = Infinity;
       for (let ix = 0; ix <= N; ix++) for (let iy = 0; iy <= N; iy++) {
         const ll = [bbx[0] + (bbx[2] - bbx[0]) * ix / N, bbx[1] + (bbx[3] - bbx[1]) * iy / N];
         const ctr = turf.point(ll);
         if (!turf.booleanPointInPolygon(ctr, buildable)) continue;
-        if (nearAny(ll, obstrCells, obFt)) continue;                 // keep clear of any obstruction cell
-        if (nearAny(ll, waterCells, waterFt)) continue;              // keep well clear of the whole pool cluster
-        if (!footprintClear(ll, padFt)) continue;                    // footprint (+pad) sits only on clearings
+        if (nearAny(ll, blockers, obFt)) continue;                  // keep clear of blocking cells
+        if (nearAny(ll, waterCells, waterFt)) continue;             // keep well clear of the whole pool cluster
+        if (!footprintClear(ll, padFt, hardOnly)) continue;         // footprint (+pad) sits only on allowed ground
         const box = mkBox(ll);
         if (!box.geometry.coordinates[0].every(p => turf.booleanPointInPolygon(turf.point(p), buildable))) continue;
         const d = turf.distance(ctr, houseAnchor, { units: 'feet' });  // nearest the house wins
@@ -329,9 +392,13 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
       }
       return best;
     };
-    // Prefer a generous clearance + separation from obstructions; relax if nothing fits.
+    // Scenario 1 (as-is): footprint on open clearing only (trees block). Scenario 2 (with clearing):
+    // trees are removable, so only HARD obstructions block — offered when nothing fits as-is.
     let aduBox = null, usedClear = 0, aduSource = 'local-classifier';
-    for (const [ob, pad] of [[24, 8], [20, 6], [16, 4], [12, 0]]) { aduBox = search(ob, pad, 64); if (aduBox) { usedClear = ob; break; } }
+    for (const [ob, pad] of [[24, 8], [20, 6], [16, 4], [12, 0]]) { aduBox = search(ob, pad, 64, false); if (aduBox) { usedClear = ob; break; } }
+    if (!aduBox) {
+      for (const [ob, pad] of [[24, 8], [20, 6], [16, 4], [12, 0]]) { aduBox = search(ob, pad, 64, true); if (aduBox) { usedClear = ob; break; } }
+    }
 
     // --- Agent self-correction hook: MOLE_ADU_HINT = "<cell label e.g. O8>" or "lon,lat".
     //     After LOOKING at the grid image, the Copilot CLI agent can move the ADU to a cell it can
@@ -345,7 +412,7 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
         else if (cellByLabel[raw.toUpperCase()]) pt = cellByLabel[raw.toUpperCase()].ll;
         if (pt) {
           const fits = (ll) => turf.booleanPointInPolygon(turf.point(ll), buildable)
-            && footprintClear(ll, 4)
+            && footprintClear(ll, 4, true)
             && mkBox(ll).geometry.coordinates[0].every(p => turf.booleanPointInPolygon(turf.point(p), buildable));
           let target = fits(pt) ? pt : null;
           if (!target) {
@@ -366,6 +433,18 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     out.aduFitsSqFt = aduBox ? Math.round(aduSideFt * aduSideFt) : 0;
     out.aduClearanceFt = usedClear;
     if (aduBox) out.aduCenter = turf.centroid(aduBox).geometry.coordinates.map(v => +v.toFixed(6));
+
+    // --- Clear-to-build zone: the tree cells whose centers fall inside the ACTUAL placed ADU
+    //     footprint — the canopy that must be removed to build here. Non-empty => "feasible with
+    //     tree clearing" scenario. Derived from the placed box itself (NOT an expanded margin) so
+    //     an as-is placement on genuinely open ground is never mislabeled as needing clearing. ----
+    let clearToBuildCells = [];
+    if (aduBox) clearToBuildCells = treeCells.filter(c => turf.booleanPointInPolygon(turf.point(c.ll), aduBox));
+    out.clearToBuildCells = clearToBuildCells.map(c => c.label);
+    out.clearToBuildSqFt = Math.round(clearToBuildCells.length * CELL_FT * CELL_FT);
+    out.treesToClear = clearToBuildCells.length ? Math.max(1, Math.round(out.clearToBuildSqFt / 400)) : 0;
+    out.aduScenario = !aduBox ? 'none' : (clearToBuildCells.length ? 'with-clearing' : 'as-is');
+    const clearToBuildSet = new Set(out.clearToBuildCells);
 
     // Which grid cell the ADU landed in (nearest cell center).
     if (aduBox) {
@@ -406,7 +485,9 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
       for (const c of cells) {
         const [px, py] = toPx(c.ll[0], c.ll[1]);
         const x = ox + px - cellPx / 2, y = headH + py - cellPx / 2;
-        if (mode === 'schematic') { ctx.fillStyle = CLASS_COLOR[c.kind]; ctx.fillRect(x, y, cellPx + 0.8, cellPx + 0.8); }
+        const c2b = clearToBuildSet.has(c.label);
+        if (mode === 'schematic') { ctx.fillStyle = c2b ? CLEAR_TO_BUILD_TINT : CLASS_COLOR[c.kind]; ctx.fillRect(x, y, cellPx + 0.8, cellPx + 0.8); }
+        else if (c2b) { ctx.fillStyle = CLEAR_TO_BUILD_TINT; ctx.fillRect(x, y, cellPx + 0.8, cellPx + 0.8); }
         else if (c.kind !== 'clearing') { ctx.fillStyle = CLASS_TINT[c.kind]; ctx.fillRect(x, y, cellPx + 0.8, cellPx + 0.8); }
         ctx.strokeStyle = mode === 'schematic' ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.18)'; ctx.lineWidth = 0.5; ctx.strokeRect(x, y, cellPx, cellPx);
       }
@@ -435,8 +516,9 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
         ctx.beginPath(); aduBox.geometry.coordinates[0].forEach((c, i) => { const [x, y] = toPx(c[0], c[1]); i ? ctx.lineTo(ox + x, headH + y) : ctx.moveTo(ox + x, headH + y); }); ctx.closePath(); ctx.fill(); ctx.stroke();
         const ac = turf.centroid(aduBox).geometry.coordinates; const [ax, ay] = toPx(ac[0], ac[1]);
         ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
-        ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 4; ctx.strokeText(`ADU ${out.aduFitsSqFt} sf`, ox + ax, headH + ay - 10);
-        ctx.fillStyle = '#fff'; ctx.fillText(`ADU ${out.aduFitsSqFt} sf`, ox + ax, headH + ay - 10);
+        const aduLabel = `ADU ${out.aduFitsSqFt} sf` + (out.aduScenario === 'with-clearing' ? ' · needs clearing' : '');
+        ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 4; ctx.strokeText(aduLabel, ox + ax, headH + ay - 10);
+        ctx.fillStyle = '#fff'; ctx.fillText(aduLabel, ox + ax, headH + ay - 10);
       }
       // panel title
       ctx.textAlign = 'left'; ctx.font = 'bold 13px sans-serif';
@@ -447,10 +529,10 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     drawPanel(panelW + gap, 'aerial');
 
     // Legend under schematic
-    const legend = [['#38b000', 'Clearing (buildable ground)'], ['#00e676', 'ADU-eligible open area (polygon)'], ['#1b5e20', 'Trees / canopy'], ['#9e9e9e', 'Structure / pavement'], ['#1e88e5', 'Water / pool'], ['#ff3b30', 'ADU 900 sf (sample placement)'], ['#00a2ff', 'House']];
+    const legend = [['#38b000', 'Clearing'], ['#00e676', 'ADU-eligible open'], ['#1b5e20', 'Trees / canopy'], ['#ff9100', 'Clear-to-build (trees to remove)'], ['#9e9e9e', 'Structure / pavement'], ['#8d6e63', 'Driveway'], ['#1e88e5', 'Water / pool'], ['#ff3b30', 'ADU sample'], ['#00a2ff', 'House']];
     let lx = 14, ly = headH + panelH - 16;
     ctx.font = '12px sans-serif';
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(8, ly - 16, 900, 24);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(8, ly - 16, cv.width - 16, 24);
     for (const [col, txt] of legend) { ctx.fillStyle = col; ctx.fillRect(lx, ly - 11, 13, 12); ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(txt, lx + 18, ly); lx += ctx.measureText(txt).width + 42; }
 
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
@@ -459,14 +541,23 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
 
     // --- Deterministic site-analysis narrative (from the clearing/obstruction classification) ---
     const cc = out.classCounts || {};
-    const totalN = (cc.clearing || 0) + (cc.tree || 0) + (cc.structure || 0) + (cc.water || 0) || 1;
+    const totalN = (cc.clearing || 0) + (cc.tree || 0) + (cc.structure || 0) + (cc.water || 0) + (cc.house || 0) + (cc.driveway || 0) || 1;
     const features = [];
-    if (buildings.length || cc.structure) features.push({ label: 'house', cell: (cells.find(c => c.kind === 'structure') || {}).label });
+    const houseFeatCell = (cells.find(c => c.kind === 'house') || cells.find(c => c.kind === 'structure') || {}).label;
+    if (buildings.length || cc.house || cc.structure) features.push({ label: 'house', cell: houseFeatCell });
+    if (cc.driveway) features.push({ label: 'driveway', cell: (cells.find(c => c.kind === 'driveway') || {}).label });
     if (cc.water) features.push({ label: 'pool', cell: (cells.find(c => c.kind === 'water') || {}).label });
     if (cc.tree) { const t = cells.filter(c => c.kind === 'tree').sort((a, b) => turf.distance(turf.point(a.ll), turf.centroid(poly)) - turf.distance(turf.point(b.ll), turf.centroid(poly)))[0]; if (t) features.push({ label: 'forest', cell: t.label }); }
+    const clearingNote = out.aduScenario === 'with-clearing'
+      ? ` No ADU fits on existing open ground, but a ${out.aduFitsSqFt} sf ADU DOES fit if ≈ ${out.clearToBuildSqFt.toLocaleString()} sf of trees (~${out.treesToClear} tree${out.treesToClear === 1 ? '' : 's'}) are cleared${out.aduCell ? ` around cell ${out.aduCell}` : ''}.`
+      : '';
     out.vision = {
-      summary: `Aerial classified into a ${CELL_FT}-ft grid — clearing vs obstruction: ~${Math.round((cc.clearing || 0) / totalN * 100)}% open clearing, ~${Math.round((cc.tree || 0) / totalN * 100)}% tree canopy${cc.water ? ', a pool/water feature' : ''}${cc.structure ? ', and structures/pavement' : ''}. The ADU-eligible open area (all buildable clearing within the setbacks) totals ≈ ${out.effectiveAreaSqFt.toLocaleString()} sf${effectivePieces.length > 1 ? ` across ${effectivePieces.length} areas` : ''} — the ADU can be sited anywhere within that green polygon; the red box is one ${out.aduFitsSqFt || 900} sf placement nearest the house.`,
-      rationale: aduBox ? `Open clearing${out.aduCell ? ` at grid cell ${out.aduCell}` : ''} — the closest buildable, unobstructed ground to the house where a full ${out.aduFitsSqFt} sf ADU fits within the setbacks, clear of the pool/structures and the forest.` : 'No open clearing large enough for a full ADU was found clear of trees, structures and water.',
+      summary: `Aerial classified into a ${CELL_FT}-ft grid — clearing vs obstruction: ~${Math.round((cc.clearing || 0) / totalN * 100)}% open clearing, ~${Math.round((cc.tree || 0) / totalN * 100)}% tree canopy${cc.water ? ', a pool/water feature' : ''}${(cc.house || cc.structure) ? ', and structures/pavement' : ''}. The ADU-eligible open area (all buildable clearing within the setbacks) totals ≈ ${out.effectiveAreaSqFt.toLocaleString()} sf${effectivePieces.length > 1 ? ` across ${effectivePieces.length} areas` : ''}; with tree clearing the buildable open area is ≈ ${out.effectiveWithClearingSqFt.toLocaleString()} sf.${clearingNote}`,
+      rationale: aduBox
+        ? (out.aduScenario === 'with-clearing'
+            ? `Requires tree clearing: a ${out.aduFitsSqFt} sf ADU${out.aduCell ? ` at grid cell ${out.aduCell}` : ''} fits only after removing ≈ ${out.clearToBuildSqFt.toLocaleString()} sf of tree canopy (shown as the orange clear-to-build zone), clear of the house, driveway, structures and water.`
+            : `Open clearing${out.aduCell ? ` at grid cell ${out.aduCell}` : ''} — the closest buildable, unobstructed ground to the house where a full ${out.aduFitsSqFt} sf ADU fits within the setbacks, clear of the driveway, pool, structures and the forest.`)
+        : 'No location — even with tree clearing — was found where a full ADU fits inside the setbacks clear of the house, driveway, structures and water.',
       concerns: (cc.tree || 0) / totalN > 0.5 ? ['Lot is heavily wooded — clearing/tree removal likely required around the ADU envelope.'] : [],
       features: features.filter(f => f.cell),
     };
@@ -482,7 +573,7 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
       gx2.font = 'bold 12px sans-serif'; gx2.textAlign = 'center';
       for (const c of cells) {
         const [px, py] = toPx(c.ll[0], c.ll[1]);
-        gx2.fillStyle = c.kind === 'clearing' ? 'rgba(255,255,80,0.10)' : CLASS_TINT[c.kind];
+        gx2.fillStyle = clearToBuildSet.has(c.label) ? CLEAR_TO_BUILD_TINT : (c.kind === 'clearing' ? 'rgba(255,255,80,0.10)' : CLASS_TINT[c.kind]);
         gx2.fillRect(px - cellPx / 2, py - cellPx / 2, cellPx, cellPx);
         gx2.strokeStyle = 'rgba(255,255,255,0.45)'; gx2.lineWidth = 1; gx2.strokeRect(px - cellPx / 2, py - cellPx / 2, cellPx, cellPx);
         gx2.strokeStyle = 'rgba(0,0,0,0.85)'; gx2.lineWidth = 3; gx2.strokeText(c.label, px, py + 4);
@@ -526,7 +617,7 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
       out.cellDetail = cells.map(c => ({ label: c.label, kind: c.kind, ...c.f }));
     }
     // Expose cells with the report/agent vocabulary (clearing→open, water→pool, structure→building).
-    const KMAP = { clearing: 'open', tree: 'tree', structure: 'building', water: 'pool' };
+    const KMAP = { clearing: 'open', tree: 'tree', structure: 'building', water: 'pool', house: 'house', driveway: 'driveway' };
     out.cells = cells.map(c => ({ label: c.label, kind: KMAP[c.kind] || c.kind, lon: +c.ll[0].toFixed(6), lat: +c.ll[1].toFixed(6) }));
     emit('sitemap', { status: 'ok', durationMs: Date.now() - t0, attributes: { pid, buildableAreaSqFt: out.buildableAreaSqFt, aduFits: !!out.aduFitsSqFt, aduSource: out.aduSource, aduCell: out.aduCell, zoom: z } });
   } catch (e) {

@@ -73,7 +73,12 @@ function run(script, args) {
   const report = buildReport(data, {
     buildableAreaSqFt: site.buildableAreaSqFt,
     effectiveAreaSqFt: site.effectiveAreaSqFt,
+    effectiveWithClearingSqFt: site.effectiveWithClearingSqFt,
+    clearableTreeSqFt: site.clearableTreeSqFt,
     aduFitsSqFt: site.aduFitsSqFt,
+    aduScenario: site.aduScenario,
+    clearToBuildSqFt: site.clearToBuildSqFt,
+    treesToClear: site.treesToClear,
     mapUrl: `${BASE}.png`,
     vision: site.vision,
     aduSource: site.aduSource,
@@ -83,9 +88,12 @@ function run(script, args) {
   fs.writeFileSync(path.join(REPORTS, `${BASE}.json`), JSON.stringify({ data, report, site }, null, 2));
 
   // 4) Concise summary for the agent — enough to judge placement WITHOUT re-parsing everything.
-  const openCells = (site.cells || []).filter(c => c.kind === 'open').map(c => c.label);
-  const houseCells = (site.cells || []).filter(c => c.kind === 'building').map(c => c.label);
-  const poolCells = (site.cells || []).filter(c => c.kind === 'pool').map(c => c.label);
+  const cellsBy = (k) => (site.cells || []).filter(c => c.kind === k).map(c => c.label);
+  const openCells = cellsBy('open');
+  const houseCells = [...cellsBy('house'), ...cellsBy('building')];
+  const poolCells = cellsBy('pool');
+  const treeCells = cellsBy('tree');
+  const drivewayCells = cellsBy('driveway');
   console.log(JSON.stringify({
     ok: !!site.ok,
     base: BASE,
@@ -93,13 +101,18 @@ function run(script, args) {
     gridImage: site.gridImage ? `reports/${site.gridImage}` : null,
     verdict: report.verdict,
     aduSource: site.aduSource,
+    aduScenario: site.aduScenario,
+    clearToBuildCells: site.clearToBuildCells || [],
+    clearToBuildSqFt: site.clearToBuildSqFt,
+    treesToClear: site.treesToClear,
     aduHint: site.aduHint || null,
     aduHintError: site.aduHintError || null,
     aduPlacedNorm: site.aduPlacedNorm || null,
     buildableAreaSqFt: site.buildableAreaSqFt,
+    effectiveWithClearingSqFt: site.effectiveWithClearingSqFt,
     aduFitsSqFt: site.aduFitsSqFt,
     classZoom: site.classZoom,
-    cells: { open: openCells, house: houseCells, pool: poolCells },
-    hintUsage: 'View the gridImage, find an OPEN-LAWN cell with your eyes, then re-run with MOLE_ADU_HINT="<cell label>" to move the ADU there.',
+    cells: { open: openCells, house: houseCells, pool: poolCells, tree: treeCells, driveway: drivewayCells },
+    hintUsage: 'View the gridImage, find an OPEN-LAWN cell with your eyes, then re-run with MOLE_ADU_HINT="<cell label>" to move the ADU there. If the lot is wooded and nothing fits on open ground, aduScenario will be "with-clearing" and clearToBuildCells lists the trees that would be removed.',
   }, null, 2));
 })();

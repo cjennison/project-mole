@@ -29,7 +29,9 @@ your own reasoning and vision are the intelligence in this system.
    side-by-side **[engineering schematic | aerial proof]** map, places a **sample 900 sf ADU box**
    on the clearing nearest the house, builds the report, and prints a JSON summary with the field
    **`gridImage`** (a zoomed, labeled decision image) plus the classified `cells` (kinds:
-   `open`/`tree`/`building`/`pool`). Collect data is cached, so re-runs only re-render (fast).
+   `open`/`tree`/`house`/`building`/`driveway`/`pool`) and the ADU siting scenario
+   (`aduScenario`: `as-is`, `with-clearing`, or `none`; plus `clearToBuildCells`,
+   `clearToBuildSqFt`, `treesToClear`). Collect data is cached, so re-runs only re-render (fast).
 
 2. **LOOK at the LABELED GRID image — this is your primary decision tool and the whole point of
    you being here:**
@@ -71,6 +73,43 @@ your own reasoning and vision are the intelligence in this system.
 
 5. When the placement is genuinely correct, you're done rendering. The `.md`/`.json`/`.png` are
    already written for the worker to upload.
+
+## Correcting the classification with YOUR OWN VISION (house/driveway/trees)
+The pixel classifier is a weak prior — **you are the real classifier.** After viewing the grid you
+can override ANY cell's class by writing a JSON file the engine reads on the next run:
+```
+reports/<BASE>.classes.json      (or point MOLE_CLASSES_FILE at any path)
+```
+Shape — map each type to the list of cell labels you SEE as that type (unlisted cells keep the
+pixel prior):
+```json
+{ "house": ["B3","C3"], "driveway": ["A5","A6"], "trees": ["F9","G9"],
+  "clearable": ["H10"], "lawn": ["O8","O9"], "pool": ["L8"] }
+```
+Vocabulary → kind: `house`/`roof`/`building`→house · `driveway`/`drive`/`road`→driveway ·
+`shed`/`garage`/`deck`/`patio`/`pavement`→structure · `pool`/`water`→water ·
+`lawn`/`grass`/`open`/`field`/`clearing`→clearing · `trees`/`forest`/`canopy`/`clearable`→tree.
+**Do this whenever the pixel classifier is clearly wrong** — most importantly when it MISSED the
+house (a tree-obscured roof, so `houseCells`/`house` is empty and the ADU anchors to the raw
+geocode) or when it scattered false "open" cells across canopy gaps on a wooded lot. Tag the house
+and driveway so the ADU anchors correctly and never lands on the drive. Then re-run
+`node tools/report.mjs "<addr>" "<BASE>"` and view the grid again.
+
+## The "clear trees to build" scenario (feasible with tree clearing)
+Trees are a **SOFT / clearable** obstruction — a house/driveway/pool/structure is HARD (can never
+host an ADU). The engine tries two placements in order:
+1. **as-is** — a full ADU on genuinely open clearing (trees block).
+2. **with-clearing** — if nothing fits as-is, trees are treated as removable, so only HARD
+   obstructions block; the tree cells the footprint would occupy become the **clear-to-build zone**
+   (orange on the map), and the report verdict becomes **"Feasible with tree clearing"** with the
+   sq ft + approx tree count to remove.
+When you review a heavily wooded lot with no real lawn, **reclassify the fake "open" canopy-gap
+cells as `trees`** (via the classes file above). This correctly flips the lot to the with-clearing
+scenario instead of pretending a canopy gap is buildable lawn. A lot is genuinely infeasible
+(`aduScenario: none`) only if a full ADU cannot fit even after clearing trees (blocked by hard
+obstructions or setbacks). Report tree clearing honestly: note protected/heritage trees, wetland
+buffers, and any local tree-cutting ordinance as things to verify.
+
 
 ## Emit telemetry as you go
 Mark progress so the dashboard can track the run:
