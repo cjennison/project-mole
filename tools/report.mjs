@@ -72,6 +72,7 @@ function run(script, args) {
   //    Blob URL after upload.
   const report = buildReport(data, {
     buildableAreaSqFt: site.buildableAreaSqFt,
+    effectiveAreaSqFt: site.effectiveAreaSqFt,
     aduFitsSqFt: site.aduFitsSqFt,
     mapUrl: `${BASE}.png`,
     vision: site.vision,

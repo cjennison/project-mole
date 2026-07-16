@@ -61,10 +61,26 @@ async function geocode(addr) {
 async function parcelPoly(gc) {
   const parts = (gc.matched || ADDRESS).split(',').map(s => s.trim());
   const street = (parts[0] || '').toUpperCase(), town = (parts[1] || '').toUpperCase();
-  const run = async (where) => (await j(`${GRANIT}/1/query?${qs({ where, outFields: 'PID,StreetAddress', returnGeometry: 'true', outSR: 4326, f: 'json' })}`)).features || [];
-  let feats = await run(`StreetAddress='${street}' AND Town='${town}'`);
-  if (!feats.length) { const n = (street.match(/^\d+/) || [])[0]; if (n) feats = await run(`StreetAddress LIKE '${n} %' AND Town='${town}'`); }
-  const f = feats[0];
+  const houseNum = (street.match(/^\d+/) || [])[0];
+  const streetName = street.replace(/^\d+\s+/, '').split(/\s+/)[0];
+  const run = async (where) => (await j(`${GRANIT}/1/query?${qs({ where, outFields: 'PID,StreetAddress,Town', returnGeometry: 'true', outSR: 4326, f: 'json' })}`)).features || [];
+  // GRANIT's statewide mosaic stores Town with inconsistent casing per source town (e.g.
+  // 'MANCHESTER' vs 'Amherst'), so filter case-insensitively — a plain Town='AMHERST' returns 0.
+  const townClause = town ? ` AND UPPER(Town)='${town}'` : '';
+  const byStreet = (feats) => feats.find(x => houseNum && new RegExp('^' + houseNum + '\\s+' + streetName, 'i').test(x.attributes.StreetAddress || ''));
+  let f = null;
+  try { const feats = await run(`StreetAddress='${street}'${townClause}`); if (feats.length) f = feats[0]; } catch {}
+  if (!f) {
+    try { const feats = await run(`StreetAddress LIKE '${houseNum} %'${townClause}`); f = byStreet(feats) || feats[0]; } catch {}
+  }
+  // Spatial envelope fallback (prefer the queried street name, then house number). Needed when the
+  // geocoder's street name differs from the parcel's (e.g. "4 POTTER WAY" vs a neighbour).
+  if (!f?.geometry?.rings) {
+    const d = 0.0015;
+    const env = JSON.stringify({ xmin: gc.lon - d, ymin: gc.lat - d, xmax: gc.lon + d, ymax: gc.lat + d, spatialReference: { wkid: 4326 } });
+    const feats = (await j(`${GRANIT}/1/query?${qs({ geometry: env, geometryType: 'esriGeometryEnvelope', inSR: 4326, spatialRel: 'esriSpatialRelIntersects', outFields: 'PID,StreetAddress,Town', returnGeometry: 'true', outSR: 4326, f: 'json' })}`)).features || [];
+    f = byStreet(feats) || feats.find(x => houseNum && String(x.attributes.StreetAddress || '').trim().startsWith(houseNum + ' ')) || feats[0];
+  }
   if (!f?.geometry?.rings) throw new Error('no parcel geometry');
   return { poly: turf.polygon(f.geometry.rings), pid: f.attributes.PID, addr: f.attributes.StreetAddress };
 }
@@ -283,6 +299,11 @@ const CLASS_TINT = { clearing: 'rgba(56,176,0,0.30)', tree: 'rgba(20,70,20,0.45)
     }
     out.effectiveAreaSqFt = Math.round(effectivePieces.reduce((s, p) => s + turf.area(p), 0) * 10.7639);
     out.effectiveAreaCount = effectivePieces.length;
+    out.effectiveLargestSqFt = effectivePieces.length ? Math.round(turf.area(effectivePieces[0]) * 10.7639) : 0;
+    out.effectivePiecesSqFt = effectivePieces.map(p => Math.round(turf.area(p) * 10.7639));
+    // Tree canopy INSIDE the buildable envelope = ground you could unlock by clearing trees.
+    const treeInBuildable = cells.filter(c => c.kind === 'tree' && turf.booleanPointInPolygon(turf.point(c.ll), buildable)).length;
+    out.clearableTreeSqFt = Math.round(treeInBuildable * CELL_FT * CELL_FT);
     // Box footprint (grown by `padFt` for separation) must contain no obstruction cell centers.
     const mkBoxExp = (ll, extraFt) => { const hd = ((aduSideFt + 2 * extraFt) / 2) * Math.SQRT2; return turf.polygon([[45, 135, 225, 315, 45].map(bd => turf.destination(turf.point(ll), hd, bd + principalBearing, { units: 'feet' }).geometry.coordinates)]); };
     const footprintClear = (ll, padFt) => {

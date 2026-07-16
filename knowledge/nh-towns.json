@@ -1,0 +1,17 @@
+{
+  "_README": "Per-town overrides for the NH ADU feasibility agent. Keys are town names exactly as NH GRANIT ParcelMosaic returns them in the 'Town' field (e.g. 'Manchester', 'Amherst', 'New Boston'). Any town NOT listed here is handled automatically with auto-derived defaults (VGSI slug derived from the name, no overrides) — you only add a town to correct the pre-2025 NH Zoning Atlas snapshot or to record a local nuance/data quirk. The statewide HB 577 ADU size bounds (750-950 sf) are enforced in code (lib/towns.mjs) regardless of what is written here. Recognized fields per town: vgsiSlug (Vision/VGSI assessor host slug, e.g. 'manchesternh'); aduMaxSqFtOverride (number, a verified local ADU size cap to use instead of the Atlas value — still clamped to 750-950); ownerOccupancyOverride ('Yes'/'No', verified local owner-occupancy requirement); detachedAduNote (string, process note for detached ADUs); notes (array of strings surfaced in the report's Local notes section).",
+  "Manchester": {
+    "vgsiSlug": "manchesternh",
+    "notes": [
+      "R-1A ADU size cap is 900 sf per the local ordinance (within the HB 577 750-950 sf band)."
+    ]
+  },
+  "Amherst": {
+    "vgsiSlug": "amherstnh",
+    "detachedAduNote": "The Atlas snapshot marks detached ADUs as 'Public Hearing'; RSA 674:72 (HB 577) allows one ADU by right, but confirm the detached-vs-attached process and any ZBA step with the town.",
+    "notes": [
+      "Rural/Residential character: 2 ac minimum lot and a 75 ft front setback are typical here.",
+      "The Atlas lists an ADU max of 1100 sf; HB 577 caps ADUs by right at 950 sf, so 950 sf governs."
+    ]
+  }
+}

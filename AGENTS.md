@@ -88,19 +88,28 @@ Full detail in `knowledge/nh-adu-playbook.md` and `knowledge/nh-data-sources.md`
   wherever single-family dwellings are allowed. This **overrides** the NH Zoning Atlas
   `aduTreatmentAtlas` field (a pre-HB577 snapshot). Report the permit path as **by-right**
   when `singleFamilyTreatment` allows single-family.
-- **Size:** town cap applies but can't be below 750 or above 950 sqft; Manchester = 900.
+- **Size:** town cap applies but can't be below 750 or above 950 sqft. `lib/report.mjs` enforces
+  this clamp automatically — `snapshot.aduMaxSqFt` is already the enforceable by-right size (e.g.
+  Amherst's Atlas 1100 → 950; Manchester 900 → 900), with the original in `aduMaxSqFtLocalCap`.
+- **Town-by-town handling:** the system is town-agnostic (all statewide APIs). Per-town facts live
+  in `knowledge/nh-towns.json`, merged in as `data.townConfig` (curated overrides layered over
+  auto-derived defaults, so **any** NH town works unattended). Curated fields: `vgsiSlug`,
+  `aduMaxSqFtOverride`, `ownerOccupancyOverride`, `detachedAduNote`, `notes[]` — surfaced in the
+  report's **Local notes** section. To correct a town's rules, add/edit its entry there.
 - **Environmental gates:** `flood.sfha === 'T'` → Special Flood Hazard Area (elevation +
   floodplain permit). `shoreland.applies === true` → NHDES shoreland permit + 50-ft setback.
   `wetlands.within100ft > 0` → possible RSA 482-A permit. Otherwise CLEARED.
 - **Dimensional fit:** the buildable envelope + ADU come from `siteplan.cjs`
   (`buildableAreaSqFt`, `aduFitsSqFt`). Confirm the lot meets `sfMinLotAcres` and frontage.
 - **Building code:** NH State Building Code = 2021 IRC/IBC.
-- If `parcel.addressMatch` is false, flag the discrepancy; treat parcel numbers as approximate.
+- If `parcel.addressMatch` is false **or `parcel.streetMatch` is false**, flag the discrepancy
+  (`streetWarning`); treat parcel numbers as approximate and verify the lot.
 - If a source failed (`errors.*`), note it as a data gap — don't fail the whole report.
 
 ## Optional deeper research (you have Playwright MCP + a browser)
 If a fact is missing and worth it, you may browse: the town assessor card via `tools/vgsi.cjs
-<town-slug> <map> <lot>` (Manchester slug `manchesternh`, use `vgsiHint` from the data), or
+<town-slug> <map> <lot>` (use `vgsiHint.slug` from the data — e.g. Manchester `manchesternh`,
+Amherst `amherstnh`; auto-derived for any town), or
 public permit/GIS portals. **NHDES OneStop** (septic/well) is Akamai bot-protected — mark
 septic/sewer confirmation as a 🧑 human step unless public sewer is otherwise evidenced.
 

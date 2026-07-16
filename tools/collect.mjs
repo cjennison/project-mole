@@ -5,6 +5,7 @@
 // Endpoints & rationale are documented in knowledge/nh-data-sources.md.
 
 import { emit, flush } from './telemetry.mjs';
+import { getTownConfig } from '../lib/towns.mjs';
 
 const ADDRESS = process.argv.slice(2).join(' ').trim();
 if (!ADDRESS) { console.error('Usage: node collect.mjs "<address>"'); process.exit(1); }
@@ -64,34 +65,38 @@ async function parcel({ lon, lat }) {
   const streetFull = (parts[0] || '').toUpperCase();
   const town = (parts[1] || '').toUpperCase();
   const houseNum = (streetFull.match(/^\s*(\d+)/) || [])[1];
+  const streetName = streetFull.replace(/^\d+\s+/, '').split(/\s+/)[0]; // first word of street
+  const byStreet = (feats) => feats.find(x => houseNum && new RegExp('^' + houseNum + '\\s+' + streetName, 'i').test(x.attributes.StreetAddress || ''));
   let f = null, strategy = null;
 
   const runQuery = async (where) => {
     const u = `${GRANIT}/1/query?${qs({ where, outFields: '*', returnGeometry: 'true', outSR: 4326, f: 'json' })}`;
     return (await j(u)).features || [];
   };
+  // GRANIT's statewide mosaic stores Town with inconsistent casing per source town
+  // ('MANCHESTER' vs 'Amherst'), so match case-insensitively — Town='AMHERST' returns 0 rows.
+  const townClause = town ? ` AND UPPER(Town)='${town}'` : '';
   // 1. exact street + town
   try {
-    const feats = await runQuery(`StreetAddress='${streetFull}' AND Town='${town}'`);
+    const feats = await runQuery(`StreetAddress='${streetFull}'${townClause}`);
     if (feats.length) { f = feats[0]; strategy = 'exact-address'; }
   } catch (e) { out.errors.parcelExact = String(e); }
   // 2. house-number LIKE within town
   if (!f && houseNum && town) {
     try {
-      const feats = await runQuery(`StreetAddress LIKE '${houseNum} %' AND Town='${town}'`);
-      const streetName = streetFull.replace(/^\d+\s+/, '').split(/\s+/)[0]; // first word of street
-      f = feats.find(x => new RegExp('^' + houseNum + '\\s+' + streetName, 'i').test(x.attributes.StreetAddress || '')) || feats[0];
+      const feats = await runQuery(`StreetAddress LIKE '${houseNum} %'${townClause}`);
+      f = byStreet(feats) || feats[0];
       if (f) strategy = 'housenum-like';
     } catch (e) { out.errors.parcelLike = String(e); }
   }
-  // 3. point envelope (wider), pick house-number match then first
+  // 3. point envelope (wider): prefer the queried street name, then any house-number match.
   if (!f) {
     const d = 0.0015;
     const env = JSON.stringify({ xmin: lon - d, ymin: lat - d, xmax: lon + d, ymax: lat + d, spatialReference: { wkid: 4326 } });
     const u = `${GRANIT}/1/query?${qs({ geometry: env, geometryType: 'esriGeometryEnvelope', inSR: 4326,
       spatialRel: 'esriSpatialRelIntersects', outFields: '*', returnGeometry: 'false', f: 'json' })}`;
     const feats = (await j(u)).features || [];
-    f = feats.find(x => houseNum && String(x.attributes.StreetAddress || '').trim().startsWith(houseNum + ' ')) || feats[0];
+    f = byStreet(feats) || feats.find(x => houseNum && String(x.attributes.StreetAddress || '').trim().startsWith(houseNum + ' ')) || feats[0];
     if (f) strategy = 'envelope-nearest';
   }
   if (!f) throw new Error('no parcel found');
@@ -108,6 +113,18 @@ async function parcel({ lon, lat }) {
   };
   if (!out.parcel.addressMatch) {
     out.parcel.warning = `Input street number ${houseNum || '?'} did not match the resolved parcel's address (${a.StreetAddress}). The queried address may not be a distinct parcel, or the geocode landed on an adjacent lot. VERIFY before relying on parcel-specific figures.`;
+  }
+  // Street-NAME sanity check: envelope-nearest can snap to a neighbour on a different street even
+  // when the house number matches (e.g. "4 POTTER WAY" resolving to "4 TRASK WAY"). Compare the
+  // street name (number + common suffixes stripped) and flag a mismatch without failing the match.
+  const streetNameOf = (s) => String(s || '').toUpperCase()
+    .replace(/^\s*\d+\s+/, '')
+    .replace(/\b(RD|ROAD|ST|STREET|AVE|AVENUE|DR|DRIVE|LN|LANE|CT|COURT|WAY|CIR|CIRCLE|BLVD|PL|PLACE|TER|TERRACE|HWY|HIGHWAY)\b/g, '')
+    .replace(/[^A-Z0-9]+/g, ' ').trim();
+  const inStreet = streetNameOf(streetFull), pStreet = streetNameOf(a.StreetAddress);
+  out.parcel.streetMatch = !inStreet || !pStreet ? null : inStreet === pStreet;
+  if (out.parcel.streetMatch === false) {
+    out.parcel.streetWarning = `Resolved parcel street "${a.StreetAddress}" differs from the queried street "${streetFull}" (matched via ${strategy}). This may be an adjacent lot — VERIFY the parcel before relying on lot-specific figures.`;
   }
   // Reliable interior query point from the parcel geometry (the Census geocode can be
   // >150m off; all point-in-polygon queries should use this instead).
@@ -275,7 +292,11 @@ async function environmental({ lon, lat }) {
     await step('shoreland', () => shoreland(qpt));
     await step('wetlands', () => wetlands(qpt));
     await step('environmental', () => environmental(qpt));
+    // Town-by-town handling: curated overrides (if any) over auto-derived defaults, so any NH
+    // town works unattended. Includes the VGSI assessor slug used by tools/vgsi.cjs.
+    out.townConfig = getTownConfig(out.parcel?.town);
     if (p.pid && /-/.test(p.pid)) { const [m, l] = p.pid.split('-'); out.vgsiHint = { map: m, lot: l }; }
+    out.vgsiHint = { ...(out.vgsiHint || {}), slug: out.townConfig?.vgsiSlug };
     emit('collect_done', { status: 'ok', attributes: {
       pid: out.parcel?.pid, district: out.zoning?.district,
       addressMatch: out.parcel?.addressMatch, matchStrategy: out.parcel?.matchStrategy,
